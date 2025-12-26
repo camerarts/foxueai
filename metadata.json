@@ -1,0 +1,7 @@
+{
+  "name": "foxue  of Long Video Assistant",
+  "description": "A personal AI-powered assistant for automating long video production workflows, from scripting to storyboard and cover generation.",
+  "requestFramePermissions": [
+    "clipboard-read"
+  ]
+}
