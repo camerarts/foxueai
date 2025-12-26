@@ -364,6 +364,16 @@ const ProjectWorkspace: React.FC = () => {
 
   const handleGenerateCoverImage = async () => {
       if (!project?.coverImage?.prompt) return;
+      
+      let finalPrompt = project.coverImage.prompt;
+      
+      // Extract Core Prompt if available to clean up input for the model
+      // We look for the text between 【输出核心Prompt】 and 【排除词 or End
+      const coreMatch = finalPrompt.match(/【输出核心Prompt】([\s\S]*?)(?:【|$)/);
+      if (coreMatch && coreMatch[1]) {
+          finalPrompt = coreMatch[1].trim();
+      }
+
       setGeneratingNodes(prev => new Set(prev).add('cover_image'));
       try {
            // API Key Check for Pro model
@@ -374,7 +384,7 @@ const ProjectWorkspace: React.FC = () => {
                 }
             } catch (e) { console.warn("AI Studio key check skipped", e); }
 
-          const base64 = await gemini.generateImage(project.coverImage.prompt + " Youtube thumbnail, high quality, 4k", 'gemini-3-pro-image-preview');
+          const base64 = await gemini.generateImage(finalPrompt + " Youtube thumbnail, high quality, 4k", 'gemini-3-pro-image-preview');
           const url = await storage.uploadImage(base64, project.id);
           
           const updated = { 
@@ -704,59 +714,52 @@ const ProjectWorkspace: React.FC = () => {
                  )}
                  {selectedNodeId === 'summary' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="简介标签" content={project.summary} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, summary: v })} /></div>}
                  {selectedNodeId === 'cover' && (
-                     <div className="p-6 h-full overflow-hidden flex flex-col">
-                        <div className="flex flex-row gap-4 h-full">
-                            <div className="flex-1 min-w-0 h-full flex flex-col">
-                                <TextResultBox
-                                    title="AI 封面提示词 (PROMPT)"
-                                    content={project.coverImage?.prompt || ''}
-                                    readOnly={true}
-                                    placeholder="生成后将在此显示用于绘图的英文提示词..."
-                                />
-                            </div>
-                            <div className="w-[220px] flex-shrink-0 flex flex-col gap-4 pt-8">
-                                {project.coverImage?.imageUrl ? (
-                                    <div className="space-y-4">
-                                        <div className="relative group rounded-xl overflow-hidden border border-slate-200 shadow-lg bg-slate-100">
-                                            <img src={project.coverImage.imageUrl} className="w-full h-auto object-cover" alt="Cover Preview" />
-                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                                <button 
-                                                    onClick={handleDownloadCover} 
-                                                    className="bg-white text-slate-900 p-2 rounded-lg font-bold shadow-xl hover:bg-slate-100 transition-colors"
-                                                    title="下载封面"
-                                                >
-                                                    <Download className="w-4 h-4" />
-                                                </button>
-                                                <button 
-                                                    onClick={handleGenerateCoverImage} 
-                                                    className="bg-white text-slate-900 p-2 rounded-lg font-bold shadow-xl hover:bg-slate-100 transition-colors"
-                                                    title="重新生成"
-                                                >
-                                                    <RefreshCw className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
+                     <div className="p-6 h-full overflow-hidden flex flex-col gap-6">
+                        <div className="h-[40%] shrink-0 min-h-[200px]">
+                            <TextResultBox
+                                title="AI 封面提示词 (PROMPT)"
+                                content={project.coverImage?.prompt || ''}
+                                readOnly={true}
+                                placeholder="生成后将在此显示用于绘图的英文提示词..."
+                            />
+                        </div>
+                        <div className="flex-1 min-h-0 bg-slate-100 rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center relative overflow-hidden group">
+                            {project.coverImage?.imageUrl ? (
+                                <div className="relative w-full h-full flex items-center justify-center">
+                                    <img src={project.coverImage.imageUrl} className="max-w-full max-h-full object-contain shadow-sm rounded-lg" alt="Cover Preview" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                        <button 
+                                            onClick={handleDownloadCover} 
+                                            className="bg-white text-slate-900 p-2 rounded-lg font-bold shadow-xl hover:bg-slate-100 transition-colors"
+                                            title="下载封面"
+                                        >
+                                            <Download className="w-4 h-4" />
+                                        </button>
+                                        <button 
+                                            onClick={handleGenerateCoverImage} 
+                                            className="bg-white text-slate-900 p-2 rounded-lg font-bold shadow-xl hover:bg-slate-100 transition-colors"
+                                            title="重新生成"
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                        </button>
                                     </div>
-                                ) : (
-                                    <div className="h-full flex flex-col gap-3">
-                                        <div className="aspect-video border-2 border-dashed border-slate-200 bg-slate-50 rounded-2xl flex flex-col items-center justify-center text-slate-400 gap-2">
-                                            <ImageIcon className="w-8 h-8 opacity-20" />
-                                            <p className="text-[10px] font-bold">暂无封面</p>
-                                        </div>
-                                        
-                                        {project.coverImage?.prompt && (
-                                            <button 
-                                                onClick={handleGenerateCoverImage}
-                                                disabled={generatingNodes.has('cover_image')}
-                                                className="w-full py-3 bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-fuchsia-500/20 hover:shadow-fuchsia-500/40 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
-                                            >
-                                                {generatingNodes.has('cover_image') ? <Loader2 className="w-4 h-4 animate-spin" /> : <Palette className="w-4 h-4" />}
-                                                生成图片
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center gap-4">
+                                    <ImageIcon className="w-12 h-12 text-slate-300" />
+                                    <p className="text-slate-400 font-medium">暂无封面图片</p>
+                                    {project.coverImage?.prompt && (
+                                        <button 
+                                            onClick={handleGenerateCoverImage}
+                                            disabled={generatingNodes.has('cover_image')}
+                                            className="px-6 py-2.5 bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-fuchsia-500/20 hover:shadow-fuchsia-500/40 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            {generatingNodes.has('cover_image') ? <Loader2 className="w-4 h-4 animate-spin" /> : <Palette className="w-4 h-4" />}
+                                            生成图片
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </div>
                      </div>
                  )}

@@ -143,15 +143,18 @@ export const DEFAULT_PROMPTS: Record<string, PromptTemplate> = {
     id: 'cover_gen',
     name: '封面图提示词',
     description: '生成用于AI绘图的封面视觉描述',
-    template: `你是一位专业的YouTube/B站视频封面设计师。请根据以下视频信息，创作一个极具吸引力、高点击率的封面画面描述（Prompt）。
+    template: `你是一位专业的YouTube/B站视频封面设计师。请根据以下视频信息，创作用于AI绘图的提示词。
 
 主题: {{title}}
 脚本摘要: {{script}}
 
-**要求：**
-1. 画面描述必须具体、生动，包含主体（Character/Object）、背景（Background）、光影（Lighting）、色彩（Colors）和构图（Composition）。
-2. 描述风格应夸张、有冲击力（High CTR style），类似于电影海报或3D渲染图。
-3. 请直接输出一段**英文**的画面描述，不要包含任何解释性文字，也不要包含具体的标题文字（因为这是给AI绘图模型看的）。
-4. 结尾加上: "hyper-realistic, 4k, cinematic lighting, vivid colors".`
+**输出格式要求：**
+请严格按照以下格式输出，不要包含任何其他解释性文字、前言或后语：
+
+【输出核心Prompt】
+(在此处填写一段英文画面描述，包含主体(Subject)、背景(Background)、光影(Lighting)、色彩(Colors)和构图(Composition)。风格夸张有冲击力。结尾加上: hyper-realistic, 4k, cinematic lighting, vivid colors)
+
+【排除词 (Negative Prompt)】
+(在此处填写英文排除词，例如: text, watermark, low quality, blurred, distorted, ugly, bad anatomy, extra limbs)`
   }
 };
