@@ -470,7 +470,115 @@ const InspirationRepo: React.FC = () => {
           </div>
         </div>
       )}
-      {/* 弹窗代码保持不变，已在上面的逻辑中修正保存延迟 */}
+      
+      {showModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="font-bold text-lg text-slate-800">记录新灵感</h3>
+              <button onClick={resetModal} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              {viewMode === 'input' && (
+                <div className="space-y-4">
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 leading-relaxed">
+                    <p className="font-bold mb-1 flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> 智能识别模式</p>
+                    <p>1. 粘贴任意包含标题的文本，AI 将自动提取核心信息。</p>
+                    <p>2. 支持从 Excel/表格 直接复制多行数据（需包含标题/分类列），自动进入批量导入模式。</p>
+                  </div>
+                  <textarea
+                    autoFocus
+                    value={rawContent}
+                    onChange={(e) => setRawContent(e.target.value)}
+                    placeholder="在此粘贴文本内容..."
+                    className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none text-sm"
+                  />
+                </div>
+              )}
+
+              {viewMode === 'single' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">分类</label>
+                      <input value={singleData.category || ''} onChange={e => setSingleData({...singleData, category: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">预估评分</label>
+                      <input value={singleData.rating || ''} onChange={e => setSingleData({...singleData, rating: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" placeholder="0-10" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">爆款标题</label>
+                    <input value={singleData.viralTitle || ''} onChange={e => setSingleData({...singleData, viralTitle: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
+                  </div>
+                  <div>
+                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">底层逻辑 (可选)</label>
+                     <input value={singleData.trafficLogic || ''} onChange={e => setSingleData({...singleData, trafficLogic: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">原始内容</label>
+                    <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-500 max-h-24 overflow-y-auto">{singleData.content}</div>
+                  </div>
+                </div>
+              )}
+
+              {viewMode === 'batch' && (
+                <div className="space-y-4">
+                   <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-slate-700">识别到 {batchData.length} 条数据</span>
+                      <span className="text-xs text-slate-400">请确认解析结果</span>
+                   </div>
+                   <div className="max-h-60 overflow-y-auto border rounded-xl">
+                      <table className="w-full text-left text-xs">
+                         <thead className="bg-slate-50 sticky top-0">
+                            <tr>
+                               <th className="p-2 border-b">分类</th>
+                               <th className="p-2 border-b">标题</th>
+                               <th className="p-2 border-b">评分</th>
+                            </tr>
+                         </thead>
+                         <tbody className="divide-y">
+                            {batchData.map((item, idx) => (
+                               <tr key={idx}>
+                                  <td className="p-2 text-slate-500">{item.category}</td>
+                                  <td className="p-2 font-bold text-slate-700">{item.viralTitle}</td>
+                                  <td className="p-2 text-slate-500">{item.rating}</td>
+                               </tr>
+                            ))}
+                         </tbody>
+                      </table>
+                   </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              {viewMode === 'input' ? (
+                <button 
+                  onClick={handleAnalyze} 
+                  disabled={extracting || !rawContent.trim()}
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-lg shadow-amber-500/20 disabled:opacity-50 flex items-center gap-2 transition-all"
+                >
+                  {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  智能提取 / 解析
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => setViewMode('input')} className="px-4 py-2.5 text-slate-500 font-bold hover:bg-white rounded-xl transition-all">返回修改</button>
+                  <button 
+                    onClick={viewMode === 'single' ? handleSaveSingle : handleSaveBatch}
+                    className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all"
+                  >
+                    <Save className="w-4 h-4" /> 确认保存
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
