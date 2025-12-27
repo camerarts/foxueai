@@ -50,6 +50,27 @@ const VoiceStudio: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Restore User Selection Preference
+  useEffect(() => {
+    const pref = localStorage.getItem('lva_voice_pref');
+    if (pref) {
+        try {
+            const { type, id, name } = JSON.parse(pref);
+            if (type === 'custom') {
+                setCustomVoiceId(id);
+                setCustomVoiceName(name || '');
+                setSelectedPresetId('');
+            } else if (type === 'preset') {
+                setSelectedPresetId(id);
+                setCustomVoiceId('');
+                setCustomVoiceName('');
+            }
+        } catch (e) {
+            console.error("Failed to parse voice preference", e);
+        }
+    }
+  }, []);
+
   useEffect(() => {
     if (location.state?.text) {
       setText(location.state.text);
@@ -92,6 +113,10 @@ const VoiceStudio: React.FC = () => {
       storage.uploadToolData(STORAGE_KEY_VOICES, payload).catch(console.error);
   };
 
+  const saveUserPref = (type: 'custom' | 'preset', id: string, name?: string) => {
+      localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name }));
+  };
+
   const handleSaveVoice = async () => {
       if (!customVoiceId.trim() || !customVoiceName.trim()) return;
       
@@ -120,13 +145,13 @@ const VoiceStudio: React.FC = () => {
       }
 
       await persistVoices(updatedList);
+      saveUserPref('custom', id, name);
       
       if (existingIndex === -1) {
-          // Clear name only if it was a new add, keeping ID allows continuous adding if needed
-          // But usually we clear name to show "done"
-          setCustomVoiceName(''); 
+          // Clear name only if it was a new add, however we keep inputs usually. 
+          // But to be cleaner:
+          // setCustomVoiceName(''); 
       }
-      // If updated, we keep the values in the box so user sees what they just edited
   };
 
   const handleDeleteVoice = async (id: string) => {
@@ -139,6 +164,7 @@ const VoiceStudio: React.FC = () => {
           setCustomVoiceName('');
           setCustomVoiceId('');
           setSelectedPresetId(PRESET_VOICES[0].id);
+          saveUserPref('preset', PRESET_VOICES[0].id);
       }
   };
 
@@ -146,12 +172,23 @@ const VoiceStudio: React.FC = () => {
       setCustomVoiceId(voice.id);
       setCustomVoiceName(voice.name); // Auto-fill name for editing
       setSelectedPresetId(''); // Clear preset selection
+      saveUserPref('custom', voice.id, voice.name);
   };
 
   const handleSelectPreset = (id: string) => {
       setSelectedPresetId(id);
       setCustomVoiceId(''); // Clear custom input to indicate preset usage
       setCustomVoiceName('');
+      saveUserPref('preset', id);
+  };
+
+  const handleCustomIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setCustomVoiceId(val);
+      if (val) {
+          setSelectedPresetId('');
+          saveUserPref('custom', val, customVoiceName);
+      }
   };
 
   const handlePreview = async () => {
@@ -301,10 +338,7 @@ const VoiceStudio: React.FC = () => {
                  <input 
                     type="text"
                     value={customVoiceId}
-                    onChange={(e) => {
-                        setCustomVoiceId(e.target.value);
-                        if (e.target.value) setSelectedPresetId('');
-                    }}
+                    onChange={handleCustomIdChange}
                     placeholder="粘贴 ElevenLabs Voice ID..."
                     className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
                  />
