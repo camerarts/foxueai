@@ -7,7 +7,7 @@ interface Env {
 export const onRequestPost = async (context: any) => {
   try {
     const { request, env } = context;
-    const { text, voice_id, stream } = await request.json();
+    const { text, voice_id, stream, model_id } = await request.json();
 
     if (!env.ELEVENLABS_API_KEY) {
       return Response.json({ error: "Server Configuration Error: Missing ELEVENLABS_API_KEY" }, { status: 500 });
@@ -17,9 +17,9 @@ export const onRequestPost = async (context: any) => {
       return Response.json({ error: "Missing text or voice_id" }, { status: 400 });
     }
 
-    // 1. Generate Cache Key (Hash of content + voice)
+    // 1. Generate Cache Key (Hash of content + voice + model)
     const encoder = new TextEncoder();
-    const data = encoder.encode(`${text}::${voice_id}`);
+    const data = encoder.encode(`${text}::${voice_id}::${model_id || 'default'}`);
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -49,7 +49,7 @@ export const onRequestPost = async (context: any) => {
       },
       body: JSON.stringify({
         text: text,
-        model_id: "eleven_multilingual_v2", // Better for mixed Chinese/English
+        model_id: model_id || "eleven_multilingual_v2", // Better for mixed Chinese/English
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.75

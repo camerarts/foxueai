@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -12,6 +12,12 @@ const PRESET_VOICES = [
   { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', category: 'American, Deep', gender: 'Male' },
   { id: 'ODq5zmih8GrVes37Dizj', name: 'Patrick', category: 'American, Shouty', gender: 'Male' },
   { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', category: 'American, Deep', gender: 'Male' },
+];
+
+const TTS_MODELS = [
+  { id: 'eleven_multilingual_v2', name: 'Eleven Multilingual v2' },
+  { id: 'eleven_turbo_v2_5', name: 'Eleven v3 (Alpha) / Turbo v2.5' },
+  { id: 'eleven_flash_v2_5', name: 'Eleven Flash v2.5' },
 ];
 
 interface CustomVoice {
@@ -32,6 +38,7 @@ const VoiceStudio: React.FC = () => {
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
+  const [modelId, setModelId] = useState(TTS_MODELS[1].id); // Default to Turbo v2.5
   
   // Project Context State
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -144,6 +151,7 @@ const VoiceStudio: React.FC = () => {
         body: JSON.stringify({
           text: text.substring(0, 500), // Preview limit
           voice_id: effectiveVoiceId,
+          model_id: modelId,
           stream: true
         })
       });
@@ -180,6 +188,7 @@ const VoiceStudio: React.FC = () => {
         body: JSON.stringify({
           text: text,
           voice_id: effectiveVoiceId,
+          model_id: modelId,
           stream: false // Request cached file
         })
       });
@@ -248,6 +257,22 @@ const VoiceStudio: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar">
           
+          {/* Model Selection */}
+          <div>
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
+                <Cpu className="w-3.5 h-3.5" /> 语音模型
+             </label>
+             <select
+                value={modelId}
+                onChange={(e) => setModelId(e.target.value)}
+                className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-500/10 cursor-pointer text-slate-700"
+             >
+                {TTS_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+             </select>
+          </div>
+
           {/* Custom Input Section */}
           <div>
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
