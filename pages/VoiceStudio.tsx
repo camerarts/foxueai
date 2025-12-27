@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -15,10 +15,10 @@ const PRESET_VOICES = [
 ];
 
 const TTS_MODELS = [
-  { id: 'eleven_multilingual_v2', name: 'Eleven Multilingual v2' },
-  { id: 'eleven_flash_v2_5', name: 'Eleven Flash v2.5' },
-  { id: 'eleven_turbo_v2_5', name: 'Eleven Turbo v2.5' },
   { id: 'eleven_multilingual_v3', name: 'Eleven v3 (Alpha)' },
+  { id: 'eleven_turbo_v2_5', name: 'Eleven Turbo v2.5' },
+  { id: 'eleven_flash_v2_5', name: 'Eleven Flash v2.5' },
+  { id: 'eleven_multilingual_v2', name: 'Eleven Multilingual v2' },
 ];
 
 interface CustomVoice {
@@ -39,7 +39,7 @@ const VoiceStudio: React.FC = () => {
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
-  const [modelId, setModelId] = useState(TTS_MODELS[3].id); // Default to Eleven v3 (Alpha)
+  const [modelId, setModelId] = useState(TTS_MODELS[0].id); // Default to Eleven v3 (Alpha)
   
   // Project Context State
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -104,15 +104,29 @@ const VoiceStudio: React.FC = () => {
           createdAt: Date.now()
       };
 
-      // Check duplicates
-      if (savedVoices.some(v => v.id === newVoice.id)) {
-          alert("该 Voice ID 已存在于收藏列表中");
-          return;
+      // Check if updating existing or adding new
+      const existingIndex = savedVoices.findIndex(v => v.id === newVoice.id);
+      
+      let updatedList;
+      if (existingIndex !== -1) {
+          // Update existing
+          updatedList = [...savedVoices];
+          updatedList[existingIndex] = {
+              ...updatedList[existingIndex],
+              name: newVoice.name
+          };
+      } else {
+          // Add new
+          updatedList = [newVoice, ...savedVoices];
       }
 
-      const updatedList = [newVoice, ...savedVoices];
       await persistVoices(updatedList);
-      setCustomVoiceName(''); // Clear name input after save
+      
+      if (existingIndex === -1) {
+          setCustomVoiceName(''); // Clear name only if it was a new add
+      } else {
+          // Maybe show a quick toast or feedback? For now, button text change is enough feedback logic below
+      }
   };
 
   const handleDeleteVoice = async (id: string) => {
@@ -120,21 +134,24 @@ const VoiceStudio: React.FC = () => {
       const updatedList = savedVoices.filter(v => v.id !== id);
       await persistVoices(updatedList);
       
-      // If deleted voice was selected, clear selection (but keep text in box so user knows what happened)
+      // If deleted voice was selected, clear inputs
       if (customVoiceId === id) {
-          // Optional: clear input or keep it as 'unsaved'
-          // Keeping it allows user to re-save if accidental
+          setCustomVoiceName('');
+          setCustomVoiceId('');
+          setSelectedPresetId(PRESET_VOICES[0].id);
       }
   };
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       setCustomVoiceId(voice.id);
+      setCustomVoiceName(voice.name); // Fill name for editing
       setSelectedPresetId(''); // Clear preset selection
   };
 
   const handleSelectPreset = (id: string) => {
       setSelectedPresetId(id);
       setCustomVoiceId(''); // Clear custom input to indicate preset usage
+      setCustomVoiceName('');
   };
 
   const handlePreview = async () => {
@@ -286,7 +303,11 @@ const VoiceStudio: React.FC = () => {
                     value={customVoiceId}
                     onChange={(e) => {
                         setCustomVoiceId(e.target.value);
+                        // Only clear preset selection, keep name if user is typing a known ID
                         if (e.target.value) setSelectedPresetId('');
+                        
+                        // If user types an ID that exists, auto-fill name? 
+                        // Maybe better to let them type or select from list to edit.
                     }}
                     placeholder="粘贴 ElevenLabs Voice ID..."
                     className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
@@ -294,42 +315,41 @@ const VoiceStudio: React.FC = () => {
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
              </div>
 
-             {/* Save Controls - Only show if ID exists and not saved */}
-             {customVoiceId && !isCurrentIdSaved && (
-                 <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
-                     <input 
-                        type="text"
-                        value={customVoiceName}
-                        onChange={(e) => setCustomVoiceName(e.target.value)}
-                        placeholder="给声音起个名..."
-                        className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300"
-                     />
-                     <button 
-                        onClick={handleSaveVoice}
-                        disabled={!customVoiceName.trim()}
-                        className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-violet-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="保存到收藏"
-                     >
-                        <Save className="w-4 h-4" />
-                     </button>
+             {/* Save/Edit Controls - Always show if ID exists */}
+             {customVoiceId && (
+                 <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-1">
+                     <div className="flex gap-2">
+                        <input 
+                            type="text"
+                            value={customVoiceName}
+                            onChange={(e) => setCustomVoiceName(e.target.value)}
+                            placeholder="给声音起个名..."
+                            className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300"
+                        />
+                        <button 
+                            onClick={handleSaveVoice}
+                            disabled={!customVoiceName.trim()}
+                            className={`px-3 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap ${isCurrentIdSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-900 hover:bg-violet-600'}`}
+                            title={isCurrentIdSaved ? "更新名称" : "保存到收藏"}
+                        >
+                            {isCurrentIdSaved ? <RefreshCw className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                            <span className="text-xs font-bold">{isCurrentIdSaved ? "更新" : "收藏"}</span>
+                        </button>
+                     </div>
+                     
+                     {/* If it's saved, show delete button option here too for convenience */}
+                     {isCurrentIdSaved && (
+                         <div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-100">
+                             <span className="text-[10px] text-slate-400">已存在于列表中</span>
+                             <button 
+                                onClick={() => handleDeleteVoice(customVoiceId)}
+                                className="text-[10px] text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1"
+                             >
+                                <Trash2 className="w-3 h-3" /> 删除
+                             </button>
+                         </div>
+                     )}
                  </div>
-             )}
-
-             {/* Delete Controls - Show if ID exists and IS saved */}
-             {customVoiceId && isCurrentIdSaved && (
-                  <div className="flex items-center justify-between mt-2 px-3 py-2 bg-emerald-50 border border-emerald-100 rounded-lg animate-in fade-in">
-                      <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                          <span className="text-xs font-bold text-emerald-700">已收藏: {savedVoiceMatch?.name}</span>
-                      </div>
-                      <button 
-                        onClick={() => handleDeleteVoice(customVoiceId)}
-                        className="p-1.5 text-emerald-600 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                        title="删除此收藏"
-                      >
-                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                  </div>
              )}
           </div>
 
@@ -350,17 +370,27 @@ const VoiceStudio: React.FC = () => {
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
                                     {voice.name[0]}
                                 </div>
-                                <div className="min-w-0">
+                                <div className="min-w-0 flex-1">
                                     <div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
                                     <div className="text-[10px] text-slate-400 font-mono truncate max-w-[120px]">{voice.id}</div>
                                 </div>
                             </div>
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }}
-                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors group-hover:opacity-100"
-                            >
-                                <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleSelectSavedVoice(voice); }}
+                                    className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                                    title="编辑"
+                                >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }}
+                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                                    title="删除"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
