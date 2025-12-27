@@ -320,7 +320,7 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
   );
 };
 
-const NODE_WIDTH = 294;
+const NODE_WIDTH = 309;
 const NODE_HEIGHT = 160;
 const NODES_CONFIG = [
   { id: 'input', label: '项目输入', panelTitle: '项目策划', icon: Layout, color: 'blue', description: '定义主题与基调', x: 50, y: 300 },
@@ -339,6 +339,7 @@ const ProjectWorkspace: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [generatingNodes, setGeneratingNodes] = useState<Set<string>>(new Set());
+  const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [prompts, setPrompts] = useState<Record<string, PromptTemplate>>({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -491,6 +492,7 @@ const ProjectWorkspace: React.FC = () => {
         return;
     }
     
+    setIsBatchGenerating(true);
     setGeneratingNodes(prev => {
         const next = new Set(prev);
         actualTargets.forEach(t => next.add(t));
@@ -543,6 +545,7 @@ const ProjectWorkspace: React.FC = () => {
     } catch (e: any) {
         alert(`一键生成部分失败: ${e.message}`);
     } finally {
+        setIsBatchGenerating(false);
         setGeneratingNodes(prev => {
             const n = new Set(prev);
             actualTargets.forEach(t => n.delete(t));
@@ -620,11 +623,11 @@ const ProjectWorkspace: React.FC = () => {
             </div>
             <button 
                 onClick={handleOneClickBatchGenerate} 
-                disabled={generatingNodes.has('titles') || generatingNodes.has('summary') || generatingNodes.has('cover') || !project.script}
+                disabled={isBatchGenerating || !project.script}
                 className={`px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-lg transition-all ${!project.script ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
                 title={!project.script ? "需先生成脚本" : "一键生成标题、简介和封面（仅生成缺失部分）"}
             >
-                {generatingNodes.size > 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} 
+                {isBatchGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />} 
                 一键生成 (3/5/6)
             </button>
         </div>
