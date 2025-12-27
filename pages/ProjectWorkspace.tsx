@@ -28,7 +28,7 @@ const CompactTimestamp = ({ ts }: { ts?: number }) => {
   const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
   return (
-    <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400/80 bg-slate-100/50 px-2 py-0.5 rounded border border-slate-200/50 whitespace-nowrap" title={`最后生成时间: ${dateStr} ${timeStr}`}>
+    <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 bg-slate-100/80 px-1.5 py-0.5 rounded border border-slate-200 whitespace-nowrap tracking-tight" title={`最后生成时间: ${dateStr} ${timeStr}`}>
       <Clock className="w-2.5 h-2.5" />
       <span>{dateStr}</span>
       <span className="opacity-30">|</span>
@@ -671,12 +671,15 @@ const ProjectWorkspace: React.FC = () => {
                                      </div>
                                  </div>
                                  <div className="flex items-center gap-2">
-                                     {ts && <CompactTimestamp ts={ts} />}
                                      {has && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
                                  </div>
                              </div>
                              <div className="p-4 flex flex-col justify-between flex-1">
-                                <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2">{n.description}</p>
+                                <div className="flex justify-between items-start gap-2">
+                                    <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2">{n.description}</p>
+                                    {ts && <div className="shrink-0"><CompactTimestamp ts={ts} /></div>}
+                                </div>
+                                
                                 {n.id !== 'input' && (
                                     <button onClick={(e) => { e.stopPropagation(); handleNodeAction(n.id); }} className={`mt-auto py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${generatingNodes.has(n.id) ? 'bg-slate-100 text-slate-400' : has ? 'bg-white border text-slate-600' : 'bg-slate-900 text-white'}`}>
                                         {generatingNodes.has(n.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : has ? <RefreshCw className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />} {generatingNodes.has(n.id) ? '生成中' : has ? '重新生成' : '生成'}
