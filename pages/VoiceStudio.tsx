@@ -98,35 +98,38 @@ const VoiceStudio: React.FC = () => {
   const handleSaveVoice = async () => {
       if (!customVoiceId.trim() || !customVoiceName.trim()) return;
       
-      const newVoice: CustomVoice = {
-          id: customVoiceId.trim(),
-          name: customVoiceName.trim(),
-          createdAt: Date.now()
-      };
+      const id = customVoiceId.trim();
+      const name = customVoiceName.trim();
 
       // Check if updating existing or adding new
-      const existingIndex = savedVoices.findIndex(v => v.id === newVoice.id);
+      const existingIndex = savedVoices.findIndex(v => v.id === id);
       
-      let updatedList;
-      if (existingIndex !== -1) {
+      let updatedList = [...savedVoices];
+      
+      if (existingIndex > -1) {
           // Update existing
-          updatedList = [...savedVoices];
           updatedList[existingIndex] = {
               ...updatedList[existingIndex],
-              name: newVoice.name
+              name: name
           };
       } else {
           // Add new
+          const newVoice: CustomVoice = {
+              id,
+              name,
+              createdAt: Date.now()
+          };
           updatedList = [newVoice, ...savedVoices];
       }
 
       await persistVoices(updatedList);
       
       if (existingIndex === -1) {
-          setCustomVoiceName(''); // Clear name only if it was a new add
-      } else {
-          // Maybe show a quick toast or feedback? For now, button text change is enough feedback logic below
+          // Clear name only if it was a new add, keeping ID allows continuous adding if needed
+          // But usually we clear name to show "done"
+          setCustomVoiceName(''); 
       }
+      // If updated, we keep the values in the box so user sees what they just edited
   };
 
   const handleDeleteVoice = async (id: string) => {
@@ -144,7 +147,7 @@ const VoiceStudio: React.FC = () => {
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       setCustomVoiceId(voice.id);
-      setCustomVoiceName(voice.name); // Fill name for editing
+      setCustomVoiceName(voice.name); // Auto-fill name for editing
       setSelectedPresetId(''); // Clear preset selection
   };
 
@@ -303,11 +306,7 @@ const VoiceStudio: React.FC = () => {
                     value={customVoiceId}
                     onChange={(e) => {
                         setCustomVoiceId(e.target.value);
-                        // Only clear preset selection, keep name if user is typing a known ID
                         if (e.target.value) setSelectedPresetId('');
-                        
-                        // If user types an ID that exists, auto-fill name? 
-                        // Maybe better to let them type or select from list to edit.
                     }}
                     placeholder="粘贴 ElevenLabs Voice ID..."
                     className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
@@ -315,7 +314,7 @@ const VoiceStudio: React.FC = () => {
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
              </div>
 
-             {/* Save/Edit Controls - Always show if ID exists */}
+             {/* Save/Edit Controls - Show if ID exists */}
              {customVoiceId && (
                  <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-1">
                      <div className="flex gap-2">
@@ -337,10 +336,10 @@ const VoiceStudio: React.FC = () => {
                         </button>
                      </div>
                      
-                     {/* If it's saved, show delete button option here too for convenience */}
+                     {/* If it's saved, show extra controls */}
                      {isCurrentIdSaved && (
                          <div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-100">
-                             <span className="text-[10px] text-slate-400">已存在于列表中</span>
+                             <span className="text-[10px] text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500"/> 已存在于列表</span>
                              <button 
                                 onClick={() => handleDeleteVoice(customVoiceId)}
                                 className="text-[10px] text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1"
