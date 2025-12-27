@@ -24,6 +24,14 @@ const Settings: React.FC = () => {
     'COVER_GEN'
   ];
 
+  const VARIABLE_MAP: Record<string, string[]> = {
+    'SCRIPT': ['{{topic}}', '{{tone}}', '{{language}}'],
+    'TITLES': ['{{title}}', '{{script}}'],
+    'STORYBOARD_TEXT': ['{{script}}'],
+    'SUMMARY': ['{{script}}'],
+    'COVER_GEN': ['{{title}}', '{{script}}']
+  };
+
   useEffect(() => {
     const init = async () => {
         const localDataRaw = localStorage.getItem('lva_prompts');
@@ -152,6 +160,7 @@ const Settings: React.FC = () => {
             const systemDef = DEFAULT_PROMPTS[key];
             const displayName = systemDef ? systemDef.name : prompt.name;
             const displayDesc = systemDef ? systemDef.description : prompt.description;
+            const variables = VARIABLE_MAP[key] || [];
 
             return (
               <div key={key} className="bg-white border border-slate-200 rounded-[32px] p-6 shadow-sm hover:shadow-md transition-all flex flex-col">
@@ -163,6 +172,15 @@ const Settings: React.FC = () => {
                     <div>
                         <h3 className="text-base font-black text-slate-800 tracking-tight">{displayName}</h3>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{displayDesc}</p>
+                        {variables.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
+                                {variables.map(v => (
+                                    <code key={v} className="text-[10px] font-mono text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100/50 select-all cursor-text" title="系统注入变量">
+                                        {v}
+                                    </code>
+                                ))}
+                            </div>
+                        )}
                     </div>
                   </div>
                   <div className="flex gap-1">
@@ -194,7 +212,16 @@ const Settings: React.FC = () => {
         <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white rounded-[40px] shadow-2xl w-[90vw] h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
                 <div className="px-8 py-6 border-b flex justify-between items-center">
-                    <h2 className="text-xl font-black text-slate-800">全屏编辑: {DEFAULT_PROMPTS[expandedKey]?.name}</h2>
+                    <div>
+                        <h2 className="text-xl font-black text-slate-800">全屏编辑: {DEFAULT_PROMPTS[expandedKey]?.name}</h2>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                            {VARIABLE_MAP[expandedKey]?.map(v => (
+                                <code key={v} className="text-xs font-mono text-indigo-500 bg-indigo-50 px-2 py-1 rounded border border-indigo-100/50 select-all">
+                                    {v}
+                                </code>
+                            ))}
+                        </div>
+                    </div>
                     <button onClick={() => setExpandedKey(null)} className="p-3 bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full"><X className="w-6 h-6" /></button>
                 </div>
                 <div className="flex-1 p-8 bg-slate-50">
