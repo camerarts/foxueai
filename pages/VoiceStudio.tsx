@@ -454,33 +454,33 @@ const VoiceStudio: React.FC = () => {
              <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
                 <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar">
                     {!loading && !streaming && !audioUrl && !errorMsg && (
-                        <span className="text-slate-600 italic">>> 系统就绪，等待任务...</span>
+                        <span className="text-slate-600 italic">&gt;&gt; 系统就绪，等待任务...</span>
                     )}
                     
                     {(loading || streaming) && (
                         <>
-                            <span className="text-slate-300">>> 任务已提交至后台</span>
-                            <span className="text-slate-300">>> 连接 ElevenLabs v3...</span>
+                            <span className="text-slate-300">&gt;&gt; 任务已提交至后台</span>
+                            <span className="text-slate-300">&gt;&gt; 连接 ElevenLabs v3...</span>
                             {text.length > 1700 && !streaming && (
-                                <span className="text-amber-400">>> [长文本模式] 检测到 {text.length} 字符</span>
+                                <span className="text-amber-400">&gt;&gt; [长文本模式] 检测到 {text.length} 字符</span>
                             )}
                             {text.length > 1700 && !streaming && (
-                                <span className="text-amber-400 animate-pulse">>> [处理中] 智能拆分 -> 逐段生成 -> 音频融合</span>
+                                <span className="text-amber-400 animate-pulse">&gt;&gt; [处理中] 智能拆分 -&gt; 逐段生成 -&gt; 音频融合</span>
                             )}
-                            <span className="text-violet-400 animate-pulse">>> 数据流传输中...</span>
+                            <span className="text-violet-400 animate-pulse">&gt;&gt; 数据流传输中...</span>
                         </>
                     )}
 
                     {audioUrl && !loading && !streaming && (
                          <>
-                            <span className="text-slate-500">>> 传输完成</span>
-                            <span className="text-emerald-400 font-bold">>> √ 音频生成成功</span>
-                            <span className="text-slate-500">>> 资源已加载到播放器</span>
+                            <span className="text-slate-500">&gt;&gt; 传输完成</span>
+                            <span className="text-emerald-400 font-bold">&gt;&gt; √ 音频生成成功</span>
+                            <span className="text-slate-500">&gt;&gt; 资源已加载到播放器</span>
                          </>
                     )}
                     
                     {errorMsg && (
-                        <span className="text-rose-500 font-bold">>> 错误: {errorMsg}</span>
+                        <span className="text-rose-500 font-bold">&gt;&gt; 错误: {errorMsg}</span>
                     )}
                 </div>
              </div>
