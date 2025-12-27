@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus } from 'lucide-react';
 import * as storage from '../services/storageService';
 
-const VOICES = [
+const PRESET_VOICES = [
   { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', category: 'American, Calm', gender: 'Female' },
   { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', category: 'American, Emotive', gender: 'Female' },
   { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', category: 'American, Soft', gender: 'Female' },
@@ -14,30 +14,108 @@ const VOICES = [
   { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', category: 'American, Deep', gender: 'Male' },
 ];
 
+interface CustomVoice {
+    id: string;
+    name: string;
+    createdAt: number;
+}
+
+const STORAGE_KEY_VOICES = 'custom_voices';
+
 const VoiceStudio: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [text, setText] = useState('');
-  const [selectedVoice, setSelectedVoice] = useState(VOICES[0].id);
+  
+  // Voice State
+  const [selectedPresetId, setSelectedPresetId] = useState(PRESET_VOICES[0].id);
   const [customVoiceId, setCustomVoiceId] = useState('');
+  const [customVoiceName, setCustomVoiceName] = useState('');
+  const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
+  
+  // Operation State
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<any[]>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load text from navigation state if available
     if (location.state?.text) {
       setText(location.state.text);
     }
-    loadHistory();
+    loadSavedVoices();
   }, [location]);
 
-  const loadHistory = async () => {
-     // Ideally load from DB, for now simple local state or modify DB schema later
-     // This version is stateless for history for simplicity in V1
+  const loadSavedVoices = async () => {
+      try {
+          // Try loading from local storage/IndexedDB first via tool data
+          const data = await storage.getToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
+          if (data && Array.isArray(data.voices)) {
+              setSavedVoices(data.voices);
+          } else {
+              // Try fetching remote if local is empty (initial sync)
+              const remote = await storage.fetchRemoteToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
+              if (remote && Array.isArray(remote.voices)) {
+                  setSavedVoices(remote.voices);
+                  // Cache locally
+                  await storage.saveToolData(STORAGE_KEY_VOICES, remote);
+              }
+          }
+      } catch (e) {
+          console.error("Failed to load custom voices", e);
+      }
+  };
+
+  const persistVoices = async (voices: CustomVoice[]) => {
+      setSavedVoices(voices);
+      const payload = { voices };
+      // Save locally
+      await storage.saveToolData(STORAGE_KEY_VOICES, payload);
+      // Sync to cloud (Background)
+      storage.uploadToolData(STORAGE_KEY_VOICES, payload).catch(console.error);
+  };
+
+  const handleSaveVoice = async () => {
+      if (!customVoiceId.trim() || !customVoiceName.trim()) return;
+      
+      const newVoice: CustomVoice = {
+          id: customVoiceId.trim(),
+          name: customVoiceName.trim(),
+          createdAt: Date.now()
+      };
+
+      // Check duplicates
+      if (savedVoices.some(v => v.id === newVoice.id)) {
+          alert("该 Voice ID 已存在于收藏列表中");
+          return;
+      }
+
+      const updatedList = [newVoice, ...savedVoices];
+      await persistVoices(updatedList);
+      setCustomVoiceName(''); // Clear name input after save
+  };
+
+  const handleDeleteVoice = async (id: string) => {
+      if (!window.confirm("确定要删除这个收藏的声音吗？")) return;
+      const updatedList = savedVoices.filter(v => v.id !== id);
+      await persistVoices(updatedList);
+      
+      // If deleted voice was selected, clear selection
+      if (customVoiceId === id) {
+          setCustomVoiceId('');
+          setSelectedPresetId(PRESET_VOICES[0].id);
+      }
+  };
+
+  const handleSelectSavedVoice = (voice: CustomVoice) => {
+      setCustomVoiceId(voice.id);
+      setSelectedPresetId(''); // Clear preset selection
+  };
+
+  const handleSelectPreset = (id: string) => {
+      setSelectedPresetId(id);
+      setCustomVoiceId(''); // Clear custom input to indicate preset usage
   };
 
   const handlePreview = async () => {
@@ -46,7 +124,7 @@ const VoiceStudio: React.FC = () => {
     setAudioUrl(null);
     setErrorMsg(null);
 
-    const effectiveVoiceId = customVoiceId.trim() || selectedVoice;
+    const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
 
     try {
       const response = await fetch('/api/tts', {
@@ -82,7 +160,7 @@ const VoiceStudio: React.FC = () => {
     setAudioUrl(null);
     setErrorMsg(null);
 
-    const effectiveVoiceId = customVoiceId.trim() || selectedVoice;
+    const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
 
     try {
       const response = await fetch('/api/tts', {
@@ -109,11 +187,14 @@ const VoiceStudio: React.FC = () => {
     }
   };
 
+  // Determine if the current custom ID is already saved
+  const isCurrentIdSaved = savedVoices.some(v => v.id === customVoiceId.trim());
+
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
       {/* Sidebar / Configuration */}
-      <div className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 z-10 shadow-sm overflow-y-auto">
-        <div>
+      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm h-full">
+        <div className="p-6 pb-2">
           <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600 mb-2 flex items-center gap-2">
             <Mic className="w-6 h-6 text-violet-600" />
             语音工坊
@@ -121,61 +202,113 @@ const VoiceStudio: React.FC = () => {
           <p className="text-xs text-slate-500 font-medium">ElevenLabs 驱动的高品质 TTS</p>
         </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar">
+          
+          {/* Custom Input Section */}
           <div>
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">选择声音</label>
-            <div className="space-y-2">
-              {VOICES.map(voice => (
-                <div 
-                  key={voice.id}
-                  onClick={() => {
-                      setSelectedVoice(voice.id);
-                      setCustomVoiceId(''); // Clear custom input
-                  }}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedVoice === voice.id && !customVoiceId ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedVoice === voice.id && !customVoiceId ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      {voice.name[0]}
-                    </div>
-                    <div>
-                      <div className={`text-sm font-bold ${selectedVoice === voice.id && !customVoiceId ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
-                      <div className="text-[10px] text-slate-400">{voice.category}</div>
-                    </div>
-                  </div>
-                  {selectedVoice === voice.id && !customVoiceId && <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-slate-100">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
                 <span>自定义 Voice ID</span>
                 {customVoiceId && <span className="text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded font-bold">优先使用</span>}
              </label>
-             <div className="relative">
+             <div className="relative mb-2">
                  <input 
                     type="text"
                     value={customVoiceId}
                     onChange={(e) => {
                         setCustomVoiceId(e.target.value);
-                        if (e.target.value) setSelectedVoice(''); // Visually deselect list
+                        if (e.target.value) setSelectedPresetId('');
                     }}
-                    placeholder="输入 ElevenLabs Voice ID..."
-                    className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white' : 'border-slate-200 focus:border-violet-300'}`}
+                    placeholder="粘贴 ElevenLabs Voice ID..."
+                    className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
                  />
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
              </div>
-             <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                如需使用克隆声音或其他库内声音，请在此粘贴 Voice ID，它将覆盖上方选择。
-             </p>
+
+             {/* Save Controls - Only show if ID exists and not saved */}
+             {customVoiceId && !isCurrentIdSaved && (
+                 <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
+                     <input 
+                        type="text"
+                        value={customVoiceName}
+                        onChange={(e) => setCustomVoiceName(e.target.value)}
+                        placeholder="给声音起个名..."
+                        className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300"
+                     />
+                     <button 
+                        onClick={handleSaveVoice}
+                        disabled={!customVoiceName.trim()}
+                        className="px-3 py-2 bg-slate-900 text-white rounded-lg hover:bg-violet-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="保存到收藏"
+                     >
+                        <Save className="w-4 h-4" />
+                     </button>
+                 </div>
+             )}
+          </div>
+
+          {/* Saved Voices List */}
+          {savedVoices.length > 0 && (
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1">
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏
+                </label>
+                <div className="space-y-2">
+                    {savedVoices.map(voice => (
+                        <div 
+                            key={voice.id}
+                            onClick={() => handleSelectSavedVoice(voice)}
+                            className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
+                        >
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
+                                    {voice.name[0]}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
+                                    <div className="text-[10px] text-slate-400 font-mono truncate max-w-[120px]">{voice.id}</div>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }}
+                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+              </div>
+          )}
+
+          {/* Preset Voices List */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">系统预置</label>
+            <div className="space-y-2">
+              {PRESET_VOICES.map(voice => (
+                <div 
+                  key={voice.id}
+                  onClick={() => handleSelectPreset(voice.id)}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedPresetId === voice.id && !customVoiceId ? 'bg-slate-100 border-slate-300 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedPresetId === voice.id && !customVoiceId ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {voice.name[0]}
+                    </div>
+                    <div>
+                      <div className={`text-sm font-bold ${selectedPresetId === voice.id && !customVoiceId ? 'text-slate-900' : 'text-slate-700'}`}>{voice.name}</div>
+                      <div className="text-[10px] text-slate-400">{voice.category}</div>
+                    </div>
+                  </div>
+                  {selectedPresetId === voice.id && !customVoiceId && <div className="w-2 h-2 rounded-full bg-slate-800" />}
+                </div>
+              ))}
+            </div>
           </div>
           
           <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
              <h4 className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> 提示</h4>
              <p className="text-[10px] text-indigo-600 leading-relaxed">
-               预览模式仅生成前 500 字符。点击“生成完整音频”将消耗额度并永久保存到云端。
+               试听生成片段（不消耗额度），满意后生成完整版并自动保存到云端。
              </p>
           </div>
         </div>
