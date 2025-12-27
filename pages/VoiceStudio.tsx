@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2 } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -101,10 +101,10 @@ const VoiceStudio: React.FC = () => {
       const updatedList = savedVoices.filter(v => v.id !== id);
       await persistVoices(updatedList);
       
-      // If deleted voice was selected, clear selection
+      // If deleted voice was selected, clear selection (but keep text in box so user knows what happened)
       if (customVoiceId === id) {
-          setCustomVoiceId('');
-          setSelectedPresetId(PRESET_VOICES[0].id);
+          // Optional: clear input or keep it as 'unsaved'
+          // Keeping it allows user to re-save if accidental
       }
   };
 
@@ -188,7 +188,8 @@ const VoiceStudio: React.FC = () => {
   };
 
   // Determine if the current custom ID is already saved
-  const isCurrentIdSaved = savedVoices.some(v => v.id === customVoiceId.trim());
+  const savedVoiceMatch = savedVoices.find(v => v.id === customVoiceId.trim());
+  const isCurrentIdSaved = !!savedVoiceMatch;
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
@@ -244,6 +245,23 @@ const VoiceStudio: React.FC = () => {
                      </button>
                  </div>
              )}
+
+             {/* Delete Controls - Show if ID exists and IS saved */}
+             {customVoiceId && isCurrentIdSaved && (
+                  <div className="flex items-center justify-between mt-2 px-3 py-2 bg-emerald-50 border border-emerald-100 rounded-lg animate-in fade-in">
+                      <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span className="text-xs font-bold text-emerald-700">已收藏: {savedVoiceMatch?.name}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteVoice(customVoiceId)}
+                        className="p-1.5 text-emerald-600 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                        title="删除此收藏"
+                      >
+                         <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                  </div>
+             )}
           </div>
 
           {/* Saved Voices List */}
@@ -270,7 +288,7 @@ const VoiceStudio: React.FC = () => {
                             </div>
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }}
-                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors group-hover:opacity-100"
                             >
                                 <Trash2 className="w-3.5 h-3.5" />
                             </button>
