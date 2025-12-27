@@ -245,24 +245,69 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
   const [val, setVal] = useState(clean(content || ''));
   const [dirty, setDirty] = useState(false);
   
+  // Ref to hold current values for unmount logic
+  const valRef = useRef(val);
+  const dirtyRef = useRef(dirty);
+
+  // Sync refs whenever state changes
+  useEffect(() => {
+    valRef.current = val;
+    dirtyRef.current = dirty;
+  }, [val, dirty]);
+  
+  // Handle external prop updates (e.g. from AI generation)
   useEffect(() => { 
-      if (!dirty) setVal(clean(content || '')); 
+      const cleanContent = clean(content || '');
+      // Only update if we are not dirty, or if the content is vastly different (AI gen overwrites)
+      if (!dirty && cleanContent !== val) {
+         setVal(cleanContent); 
+      }
   }, [content, dirty]);
+
+  // Auto-save Logic (Debounce 1.5s)
+  useEffect(() => {
+    if (!dirty || !onSave || readOnly) return;
+
+    const timer = setTimeout(() => {
+        onSave(val);
+        setDirty(false);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [val, dirty, onSave, readOnly]);
+
+  // Save on unmount (e.g. switching sidebar tabs)
+  useEffect(() => {
+      return () => {
+          if (dirtyRef.current && onSave && !readOnly) {
+              onSave(valRef.current);
+          }
+      };
+  }, []); // Run cleanup on unmount
+
+  const handleChange = (e: any) => {
+      setVal(clean(e.target.value));
+      setDirty(true);
+  };
 
   const stats = (t: string) => `【共${t.length}字符，汉字${(t.match(/[\u4e00-\u9fa5]/g) || []).length}个】`;
   
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col h-full max-h-[600px]">
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
-        <div className="flex items-center gap-3"><h4 className="text-xs font-bold text-slate-500 uppercase">{title}</h4>{showStats && <span className="text-[10px] bg-white px-2 py-0.5 rounded border font-bold text-indigo-600 border-indigo-100">{stats(val)}</span>}</div>
+        <div className="flex items-center gap-3">
+            <h4 className="text-xs font-bold text-slate-500 uppercase">{title}</h4>
+            {showStats && <span className="text-[10px] bg-white px-2 py-0.5 rounded border font-bold text-indigo-600 border-indigo-100">{stats(val)}</span>}
+            {!dirty && !readOnly && onSave && <span className="text-[10px] font-bold text-emerald-500 animate-in fade-in">已自动保存</span>}
+        </div>
         <div className="flex items-center gap-2">
             {extraActions}
-            {!readOnly && onSave && dirty && <button onClick={() => { onSave(val); setDirty(false); }} className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">保存</button>}
+            {!readOnly && onSave && dirty && <button onClick={() => { onSave(val); setDirty(false); }} className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2 py-1 rounded transition-colors">立即保存</button>}
             <RowCopyButton text={val} />
         </div>
       </div>
       {onSave && !readOnly ? (
-        <textarea className="flex-1 w-full p-4 text-sm text-slate-700 leading-relaxed outline-none resize-none font-mono" value={val} onChange={(e) => { setVal(clean(e.target.value)); setDirty(true); }} placeholder={placeholder} />
+        <textarea className="flex-1 w-full p-4 text-sm text-slate-700 leading-relaxed outline-none resize-none font-mono" value={val} onChange={handleChange} placeholder={placeholder} />
       ) : (
         <div className="p-4 overflow-y-auto whitespace-pre-wrap text-sm text-slate-700 leading-relaxed flex-1 font-mono">{content || <span className="text-slate-300 italic">暂无内容</span>}</div>
       )}
@@ -377,7 +422,7 @@ const ProjectWorkspace: React.FC = () => {
 
         const now = Date.now();
         const nextProject = { ...project, ...update, moduleTimestamps: { ...(project.moduleTimestamps || {}), [nodeId]: now } };
-        updateProjectAndSyncImmediately(nextProject);
+        updateProjectAndSyncImmediately(nextProject, true); // AI generated content should sync immediately
 
     } catch (e: any) { alert(`生成失败: ${e.message}`); } finally { setGeneratingNodes(prev => { const n = new Set(prev); n.delete(nodeId); return n; }); }
   };
@@ -411,7 +456,7 @@ const ProjectWorkspace: React.FC = () => {
               ...project, 
               coverImage: { ...project.coverImage, imageUrl: url } 
           };
-          updateProjectAndSyncImmediately(updated);
+          updateProjectAndSyncImmediately(updated, true);
       } catch (e: any) {
           alert(`生图失败: ${e.message}`);
       } finally {
@@ -488,7 +533,7 @@ const ProjectWorkspace: React.FC = () => {
             }
         };
 
-        updateProjectAndSyncImmediately(nextProject);
+        updateProjectAndSyncImmediately(nextProject, true);
 
     } catch (e: any) {
         alert(`一键生成部分失败: ${e.message}`);
@@ -649,7 +694,7 @@ const ProjectWorkspace: React.FC = () => {
                         title="视频脚本" 
                         content={project.script} 
                         showStats={true} 
-                        onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v }, true)} 
+                        onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v }, false)} 
                         autoCleanAsterisks={true} 
                         extraActions={
                             <button 
@@ -750,7 +795,7 @@ const ProjectWorkspace: React.FC = () => {
                         </div>
                      </div>
                  )}
-                 {selectedNodeId === 'summary' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="简介标签" content={project.summary} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, summary: v }, true)} /></div>}
+                 {selectedNodeId === 'summary' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="简介标签" content={project.summary} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, summary: v }, false)} /></div>}
                  {selectedNodeId === 'cover' && (
                      <div className="p-6 h-full overflow-hidden flex flex-col gap-6">
                         <div className="h-[40%] shrink-0 min-h-[200px]">
