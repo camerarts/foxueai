@@ -17,17 +17,22 @@ const formatTimestamp = (ts?: number) => {
   if (!ts) return null;
   const d = new Date(ts);
   const pad = (n: number) => n.toString().padStart(2, '0');
-  return `本次生成时间: ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `本次生成时间: ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
 const CompactTimestamp = ({ ts }: { ts?: number }) => {
   if (!ts) return null;
   const d = new Date(ts);
   const pad = (n: number) => n.toString().padStart(2, '0');
+  const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
   return (
-    <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400/80 bg-slate-100/50 px-1.5 py-0.5 rounded border border-slate-200/50">
+    <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400/80 bg-slate-100/50 px-2 py-0.5 rounded border border-slate-200/50 whitespace-nowrap" title={`最后生成时间: ${dateStr} ${timeStr}`}>
       <Clock className="w-2.5 h-2.5" />
-      {pad(d.getHours())}:{pad(d.getMinutes())}
+      <span>{dateStr}</span>
+      <span className="opacity-30">|</span>
+      <span>{timeStr}</span>
     </div>
   );
 };
