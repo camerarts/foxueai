@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -310,10 +310,10 @@ const VoiceStudio: React.FC = () => {
           <p className="text-xs text-slate-500 font-medium">ElevenLabs 驱动的高品质 TTS</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar flex flex-col">
           
           {/* Model Selection */}
-          <div>
+          <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
                 <Cpu className="w-3.5 h-3.5" /> 语音模型
              </label>
@@ -329,7 +329,7 @@ const VoiceStudio: React.FC = () => {
           </div>
 
           {/* Custom Input Section */}
-          <div>
+          <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
                 <span>自定义 Voice ID</span>
                 {customVoiceId && <span className="text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded font-bold">优先使用</span>}
@@ -385,7 +385,7 @@ const VoiceStudio: React.FC = () => {
 
           {/* Saved Voices List */}
           {savedVoices.length > 0 && (
-              <div>
+              <div className="shrink-0">
                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1">
                     <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏
                 </label>
@@ -427,37 +427,65 @@ const VoiceStudio: React.FC = () => {
               </div>
           )}
 
-          {/* Preset Voices List */}
-          <div>
+          {/* Preset Voices Dropdown - Replaces previous list */}
+          <div className="shrink-0">
             <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">系统预置</label>
-            <div className="space-y-2">
-              {PRESET_VOICES.map(voice => (
-                <div 
-                  key={voice.id}
-                  onClick={() => handleSelectPreset(voice.id)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedPresetId === voice.id && !customVoiceId ? 'bg-slate-100 border-slate-300 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedPresetId === voice.id && !customVoiceId ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                      {voice.name[0]}
-                    </div>
-                    <div>
-                      <div className={`text-sm font-bold ${selectedPresetId === voice.id && !customVoiceId ? 'text-slate-900' : 'text-slate-700'}`}>{voice.name}</div>
-                      <div className="text-[10px] text-slate-400">{voice.category}</div>
-                    </div>
-                  </div>
-                  {selectedPresetId === voice.id && !customVoiceId && <div className="w-2 h-2 rounded-full bg-slate-800" />}
-                </div>
-              ))}
-            </div>
+            <select
+                value={customVoiceId ? "" : selectedPresetId}
+                onChange={(e) => {
+                    if (e.target.value) handleSelectPreset(e.target.value);
+                }}
+                className={`w-full px-3 py-3 text-xs font-bold bg-white border border-slate-200 rounded-xl outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-500/10 cursor-pointer transition-colors ${customVoiceId ? 'text-slate-400 bg-slate-50' : 'text-slate-700'}`}
+            >
+                {customVoiceId && <option value="" disabled>-- 自定义 Voice ID 激活中 --</option>}
+                {PRESET_VOICES.map(voice => (
+                    <option key={voice.id} value={voice.id} className="text-slate-700">
+                        {voice.name} · {voice.gender} ({voice.category})
+                    </option>
+                ))}
+            </select>
           </div>
           
-          <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-             <h4 className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> 提示</h4>
-             <p className="text-[10px] text-indigo-600 leading-relaxed">
-               试听生成片段（不消耗额度），满意后生成完整版并自动保存到云端。
-             </p>
+          {/* Generation Progress Console */}
+          <div className="flex-1 flex flex-col justify-end min-h-[150px]">
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
+                 <Activity className="w-3.5 h-3.5" /> 生成进度
+             </label>
+             <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
+                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar">
+                    {!loading && !streaming && !audioUrl && !errorMsg && (
+                        <span className="text-slate-600 italic">>> 系统就绪，等待任务...</span>
+                    )}
+                    
+                    {(loading || streaming) && (
+                        <>
+                            <span className="text-slate-300">>> 任务已提交至后台</span>
+                            <span className="text-slate-300">>> 连接 ElevenLabs v3...</span>
+                            {text.length > 1700 && !streaming && (
+                                <span className="text-amber-400">>> [长文本模式] 检测到 {text.length} 字符</span>
+                            )}
+                            {text.length > 1700 && !streaming && (
+                                <span className="text-amber-400 animate-pulse">>> [处理中] 智能拆分 -> 逐段生成 -> 音频融合</span>
+                            )}
+                            <span className="text-violet-400 animate-pulse">>> 数据流传输中...</span>
+                        </>
+                    )}
+
+                    {audioUrl && !loading && !streaming && (
+                         <>
+                            <span className="text-slate-500">>> 传输完成</span>
+                            <span className="text-emerald-400 font-bold">>> √ 音频生成成功</span>
+                            <span className="text-slate-500">>> 资源已加载到播放器</span>
+                         </>
+                    )}
+                    
+                    {errorMsg && (
+                        <span className="text-rose-500 font-bold">>> 错误: {errorMsg}</span>
+                    )}
+                </div>
+             </div>
           </div>
+
         </div>
       </div>
 
