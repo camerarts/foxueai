@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -29,16 +29,29 @@ const STORAGE_KEY_VOICES = 'custom_voices';
 const VoiceStudio: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [text, setText] = useState('');
   
+  // Workflow State: 1=Input/Split, 2=Generate, 3=Merge
+  const [step, setStep] = useState(1);
+  const [isSplitMode, setIsSplitMode] = useState(false);
+
+  // Text State
+  const [text, setText] = useState('');
+  const [textPart1, setTextPart1] = useState('');
+  const [textPart2, setTextPart2] = useState('');
+  
+  // Audio State
+  const [audioUrl1, setAudioUrl1] = useState<string | null>(null);
+  const [audioUrl2, setAudioUrl2] = useState<string | null>(null);
+  const [finalAudioUrl, setFinalAudioUrl] = useState<string | null>(null);
+
   // Voice State
   const [selectedPresetId, setSelectedPresetId] = useState(PRESET_VOICES[0].id);
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
-  const [modelId, setModelId] = useState(TTS_MODELS[0].id); // Default to Eleven v3
+  const [modelId, setModelId] = useState(TTS_MODELS[0].id);
   
-  // Project Context State
+  // Project Context
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
   const [savingToProject, setSavingToProject] = useState(false);
@@ -46,11 +59,15 @@ const VoiceStudio: React.FC = () => {
   // Operation State
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [consoleLogs, setConsoleLogs] = useState<string[]>(['>> 系统就绪，等待任务...']);
 
-  // Restore User Selection Preference
+  const addLog = (msg: string) => {
+      setConsoleLogs(prev => [...prev.slice(-10), `>> ${msg}`]);
+  };
+
+  // Restore User Preference
   useEffect(() => {
     const pref = localStorage.getItem('lva_voice_pref');
     if (pref) {
@@ -84,18 +101,22 @@ const VoiceStudio: React.FC = () => {
     loadSavedVoices();
   }, [location]);
 
+  // Check text length on change to suggest splitting
+  useEffect(() => {
+      if (text.length > 1700 && !isSplitMode && step === 1) {
+          addLog(`检测到长文本 (${text.length} 字符)，建议使用拆分功能。`);
+      }
+  }, [text]);
+
   const loadSavedVoices = async () => {
       try {
-          // Try loading from local storage/IndexedDB first via tool data
           const data = await storage.getToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
           if (data && Array.isArray(data.voices)) {
               setSavedVoices(data.voices);
           } else {
-              // Try fetching remote if local is empty (initial sync)
               const remote = await storage.fetchRemoteToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
               if (remote && Array.isArray(remote.voices)) {
                   setSavedVoices(remote.voices);
-                  // Cache locally
                   await storage.saveToolData(STORAGE_KEY_VOICES, remote);
               }
           }
@@ -107,9 +128,7 @@ const VoiceStudio: React.FC = () => {
   const persistVoices = async (voices: CustomVoice[]) => {
       setSavedVoices(voices);
       const payload = { voices };
-      // Save locally
       await storage.saveToolData(STORAGE_KEY_VOICES, payload);
-      // Sync to cloud (Background)
       storage.uploadToolData(STORAGE_KEY_VOICES, payload).catch(console.error);
   };
 
@@ -119,47 +138,23 @@ const VoiceStudio: React.FC = () => {
 
   const handleSaveVoice = async () => {
       if (!customVoiceId.trim() || !customVoiceName.trim()) return;
-      
       const id = customVoiceId.trim();
       const name = customVoiceName.trim();
-
-      // Check if updating existing or adding new
       const existingIndex = savedVoices.findIndex(v => v.id === id);
-      
       let updatedList = [...savedVoices];
-      
       if (existingIndex > -1) {
-          // Update existing
-          updatedList[existingIndex] = {
-              ...updatedList[existingIndex],
-              name: name
-          };
+          updatedList[existingIndex] = { ...updatedList[existingIndex], name: name };
       } else {
-          // Add new
-          const newVoice: CustomVoice = {
-              id,
-              name,
-              createdAt: Date.now()
-          };
-          updatedList = [newVoice, ...savedVoices];
+          updatedList = [{ id, name, createdAt: Date.now() }, ...savedVoices];
       }
-
       await persistVoices(updatedList);
       saveUserPref('custom', id, name);
-      
-      if (existingIndex === -1) {
-          // Clear name only if it was a new add, however we keep inputs usually. 
-          // But to be cleaner:
-          // setCustomVoiceName(''); 
-      }
   };
 
   const handleDeleteVoice = async (id: string) => {
       if (!window.confirm("确定要删除这个收藏的声音吗？")) return;
       const updatedList = savedVoices.filter(v => v.id !== id);
       await persistVoices(updatedList);
-      
-      // If deleted voice was selected, clear inputs
       if (customVoiceId === id) {
           setCustomVoiceName('');
           setCustomVoiceId('');
@@ -170,14 +165,14 @@ const VoiceStudio: React.FC = () => {
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       setCustomVoiceId(voice.id);
-      setCustomVoiceName(voice.name); // Auto-fill name for editing
-      setSelectedPresetId(''); // Clear preset selection
+      setCustomVoiceName(voice.name);
+      setSelectedPresetId('');
       saveUserPref('custom', voice.id, voice.name);
   };
 
   const handleSelectPreset = (id: string) => {
       setSelectedPresetId(id);
-      setCustomVoiceId(''); // Clear custom input to indicate preset usage
+      setCustomVoiceId('');
       setCustomVoiceName('');
       saveUserPref('preset', id);
   };
@@ -191,81 +186,164 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
+  // --- Step 1: Split Text ---
+  const handleSplitText = () => {
+      if (!text) return;
+      
+      const limit = Math.ceil(text.length / 2);
+      
+      // Smart split logic: find closest sentence ending near middle
+      let splitIdx = text.lastIndexOf('。', limit + 100);
+      if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('.', limit + 100);
+      if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('\n', limit + 100);
+      
+      if (splitIdx === -1) splitIdx = limit; // Hard split if no punctuation
+      else splitIdx += 1; // Include punctuation
+
+      setTextPart1(text.substring(0, splitIdx));
+      setTextPart2(text.substring(splitIdx));
+      
+      setIsSplitMode(true);
+      setStep(2);
+      addLog(`文本已拆分为两部分 (P1: ${splitIdx}, P2: ${text.length - splitIdx})`);
+  };
+
+  const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
+      const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: txt,
+          voice_id: effectiveVoiceId,
+          model_id: modelId,
+          stream: streamMode
+        })
+      });
+
+      if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Generation failed');
+      }
+
+      if (streamMode) {
+          const blob = await response.blob();
+          return URL.createObjectURL(blob);
+      } else {
+          const data = await response.json();
+          return data.url;
+      }
+  };
+
+  // --- Preview (Single) ---
   const handlePreview = async () => {
     if (!text.trim()) return;
     setStreaming(true);
-    setAudioUrl(null);
-    setErrorMsg(null);
-
-    const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
-
+    addLog("开始试听片段生成...");
     try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: text.substring(0, 500), // Preview limit
-          voice_id: effectiveVoiceId,
-          model_id: modelId,
-          stream: true
-        })
-      });
+        const url = await callTtsApi(text.substring(0, 300), true);
+        if (audioRef.current) {
+            audioRef.current.src = url;
+            audioRef.current.play();
+        }
+        addLog("试听片段播放中");
+    } catch (e: any) {
+        setErrorMsg(e.message);
+        addLog(`错误: ${e.message}`);
+    } finally {
+        setStreaming(false);
+    }
+  };
 
-      if (!response.ok) throw new Error((await response.json()).error || 'Streaming failed');
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setAudioUrl(url);
+  // --- Step 2: Generate Dual Audio ---
+  const handleGenerateDual = async () => {
+      if (!textPart1 || !textPart2) return;
+      setLoading(true);
+      setErrorMsg(null);
+      setAudioUrl1(null);
+      setAudioUrl2(null);
       
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play();
+      addLog("开始并行生成两段语音...");
+
+      try {
+          // Parallel Generation using non-streaming (cached) endpoint for better quality/stability
+          const [res1, res2] = await Promise.all([
+              callTtsApi(textPart1, false),
+              callTtsApi(textPart2, false)
+          ]);
+
+          setAudioUrl1(res1);
+          setAudioUrl2(res2);
+          addLog("两段语音生成完毕，进入合并阶段");
+          setStep(3);
+      } catch (e: any) {
+          setErrorMsg(e.message);
+          addLog(`生成失败: ${e.message}`);
+      } finally {
+          setLoading(false);
       }
-    } catch (e: any) {
-      setErrorMsg(e.message);
-    } finally {
-      setStreaming(false);
-    }
   };
 
-  const handleGenerate = async () => {
-    if (!text.trim()) return;
-    setLoading(true);
-    setAudioUrl(null);
-    setErrorMsg(null);
-
-    const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
-
-    try {
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: text,
-          voice_id: effectiveVoiceId,
-          model_id: modelId,
-          stream: false // Request cached file
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Generation failed');
-
-      setAudioUrl(data.url);
-      if (audioRef.current) {
-          audioRef.current.src = data.url;
+  // --- Single Generate (No Split) ---
+  const handleGenerateSingle = async () => {
+      setLoading(true);
+      try {
+          const url = await callTtsApi(text, false);
+          setFinalAudioUrl(url);
+          if (audioRef.current) audioRef.current.src = url;
+          addLog("完整语音生成成功");
+      } catch (e: any) {
+          setErrorMsg(e.message);
+          addLog(`生成失败: ${e.message}`);
+      } finally {
+          setLoading(false);
       }
-    } catch (e: any) {
-      setErrorMsg(e.message);
-    } finally {
-      setLoading(false);
-    }
   };
 
-  const handleSaveToProject = async () => {
-      if (!audioUrl || !projectId) return;
-      if (audioUrl.startsWith('blob:')) {
-          alert("请先点击“生成完整音频”以获取可保存的持久化文件。");
+  // --- Step 3: Merge Audio ---
+  const handleMerge = async () => {
+      if (!audioUrl1 || !audioUrl2) return;
+      setLoading(true);
+      addLog("开始合并音频...");
+
+      try {
+          // Fetch both blobs
+          const [blob1, blob2] = await Promise.all([
+              fetch(audioUrl1).then(r => r.blob()),
+              fetch(audioUrl2).then(r => r.blob())
+          ]);
+
+          // Concatenate Blobs (MP3 allows simple concatenation)
+          const mergedBlob = new Blob([blob1, blob2], { type: 'audio/mpeg' });
+          
+          // Upload merged file to R2 to get a permanent URL
+          // We use the storage service logic manually here to upload a Blob
+          const file = new File([mergedBlob], `merged_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+          const uploadedUrl = await storage.uploadFile(file, projectId || 'temp_voice_studio');
+          
+          setFinalAudioUrl(uploadedUrl);
+          if (audioRef.current) audioRef.current.src = uploadedUrl;
+          
+          addLog("合并并上传成功！");
+          
+          // If in project context, auto save
+          if (projectId) {
+              await handleSaveToProject(uploadedUrl);
+          }
+
+      } catch (e: any) {
+          setErrorMsg(e.message);
+          addLog(`合并失败: ${e.message}`);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleSaveToProject = async (urlOverride?: string) => {
+      const targetUrl = urlOverride || finalAudioUrl;
+      if (!targetUrl || !projectId) return;
+      if (targetUrl.startsWith('blob:')) {
+          alert("请先生成完整音频（非试听）以获取可保存的文件。");
           return;
       }
 
@@ -275,17 +353,13 @@ const VoiceStudio: React.FC = () => {
           if (project) {
                const updated = { 
                    ...project, 
-                   audioFile: audioUrl,
+                   audioFile: targetUrl,
                    moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
                };
                await storage.saveProject(updated);
-               
-               // Trigger background sync
                storage.uploadProjects().catch(console.error);
-
+               addLog(`已保存到项目: ${project.title}`);
                alert(`已成功保存到项目 "${project.title}" 的音频文件中！`);
-          } else {
-              alert("找不到对应项目，可能已被删除。");
           }
       } catch(e: any) {
           alert("保存失败: " + e.message);
@@ -294,13 +368,12 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // Determine if the current custom ID is already saved
   const savedVoiceMatch = savedVoices.find(v => v.id === customVoiceId.trim());
   const isCurrentIdSaved = !!savedVoiceMatch;
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
-      {/* Sidebar / Configuration */}
+      {/* Sidebar */}
       <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm h-full">
         <div className="p-6 pb-2">
           <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600 mb-2 flex items-center gap-2">
@@ -311,7 +384,6 @@ const VoiceStudio: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar flex flex-col">
-          
           {/* Model Selection */}
           <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
@@ -320,15 +392,13 @@ const VoiceStudio: React.FC = () => {
              <select
                 value={modelId}
                 onChange={(e) => setModelId(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-500/10 cursor-pointer text-slate-700"
+                className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer text-slate-700"
              >
-                {TTS_MODELS.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
+                {TTS_MODELS.map(m => (<option key={m.id} value={m.id}>{m.name}</option>))}
              </select>
           </div>
 
-          {/* Custom Input Section */}
+          {/* Custom Input */}
           <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
                 <span>自定义 Voice ID</span>
@@ -344,8 +414,6 @@ const VoiceStudio: React.FC = () => {
                  />
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
              </div>
-
-             {/* Save/Edit Controls - Show if ID exists */}
              {customVoiceId && (
                  <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-1">
                      <div className="flex gap-2">
@@ -356,70 +424,34 @@ const VoiceStudio: React.FC = () => {
                             placeholder="给声音起个名..."
                             className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300"
                         />
-                        <button 
-                            onClick={handleSaveVoice}
-                            disabled={!customVoiceName.trim()}
-                            className={`px-3 py-2 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap ${isCurrentIdSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-900 hover:bg-violet-600'}`}
-                            title={isCurrentIdSaved ? "更新名称" : "保存到收藏"}
-                        >
+                        <button onClick={handleSaveVoice} disabled={!customVoiceName.trim()} className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap ${isCurrentIdSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-900 hover:bg-violet-600'}`}>
                             {isCurrentIdSaved ? <RefreshCw className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                             <span className="text-xs font-bold">{isCurrentIdSaved ? "更新" : "收藏"}</span>
                         </button>
                      </div>
-                     
-                     {/* If it's saved, show extra controls */}
                      {isCurrentIdSaved && (
                          <div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-100">
-                             <span className="text-[10px] text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500"/> 已存在于列表</span>
-                             <button 
-                                onClick={() => handleDeleteVoice(customVoiceId)}
-                                className="text-[10px] text-rose-500 hover:text-rose-700 hover:underline flex items-center gap-1"
-                             >
-                                <Trash2 className="w-3 h-3" /> 删除
-                             </button>
+                             <span className="text-[10px] text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500"/> 已存在</span>
+                             <button onClick={() => handleDeleteVoice(customVoiceId)} className="text-[10px] text-rose-500 hover:text-rose-700 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 删除</button>
                          </div>
                      )}
                  </div>
              )}
           </div>
 
-          {/* Saved Voices List */}
+          {/* Saved Voices */}
           {savedVoices.length > 0 && (
               <div className="shrink-0">
-                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏
-                </label>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1"><Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏</label>
                 <div className="space-y-2">
                     {savedVoices.map(voice => (
-                        <div 
-                            key={voice.id}
-                            onClick={() => handleSelectSavedVoice(voice)}
-                            className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
-                        >
+                        <div key={voice.id} onClick={() => handleSelectSavedVoice(voice)} className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}>
                             <div className="flex items-center gap-3 overflow-hidden">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
-                                    {voice.name[0]}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
-                                    <div className="text-[10px] text-slate-400 font-mono truncate max-w-[120px]">{voice.id}</div>
-                                </div>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>{voice.name[0]}</div>
+                                <div className="min-w-0 flex-1"><div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div></div>
                             </div>
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); handleSelectSavedVoice(voice); }}
-                                    className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
-                                    title="编辑"
-                                >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }}
-                                    className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-                                    title="删除"
-                                >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }} className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                             </div>
                         </div>
                     ))}
@@ -427,65 +459,31 @@ const VoiceStudio: React.FC = () => {
               </div>
           )}
 
-          {/* Preset Voices Dropdown - Replaces previous list */}
+          {/* Presets */}
           <div className="shrink-0">
             <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">系统预置</label>
             <select
                 value={customVoiceId ? "" : selectedPresetId}
-                onChange={(e) => {
-                    if (e.target.value) handleSelectPreset(e.target.value);
-                }}
-                className={`w-full px-3 py-3 text-xs font-bold bg-white border border-slate-200 rounded-xl outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-500/10 cursor-pointer transition-colors ${customVoiceId ? 'text-slate-400 bg-slate-50' : 'text-slate-700'}`}
+                onChange={(e) => { if (e.target.value) handleSelectPreset(e.target.value); }}
+                className={`w-full px-3 py-3 text-xs font-bold bg-white border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer transition-colors ${customVoiceId ? 'text-slate-400 bg-slate-50' : 'text-slate-700'}`}
             >
                 {customVoiceId && <option value="" disabled>-- 自定义 Voice ID 激活中 --</option>}
-                {PRESET_VOICES.map(voice => (
-                    <option key={voice.id} value={voice.id} className="text-slate-700">
-                        {voice.name} · {voice.gender} ({voice.category})
-                    </option>
-                ))}
+                {PRESET_VOICES.map(voice => (<option key={voice.id} value={voice.id}>{voice.name} · {voice.gender}</option>))}
             </select>
           </div>
           
-          {/* Generation Progress Console */}
+          {/* Console */}
           <div className="flex-1 flex flex-col justify-end min-h-[150px]">
-             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
-                 <Activity className="w-3.5 h-3.5" /> 生成进度
-             </label>
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Activity className="w-3.5 h-3.5" /> 生成进度</label>
              <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
-                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar">
-                    {!loading && !streaming && !audioUrl && !errorMsg && (
-                        <span className="text-slate-600 italic">&gt;&gt; 系统就绪，等待任务...</span>
-                    )}
-                    
-                    {(loading || streaming) && (
-                        <>
-                            <span className="text-slate-300">&gt;&gt; 任务已提交至后台</span>
-                            <span className="text-slate-300">&gt;&gt; 连接 ElevenLabs v3...</span>
-                            {text.length > 1700 && !streaming && (
-                                <span className="text-amber-400">&gt;&gt; [长文本模式] 检测到 {text.length} 字符</span>
-                            )}
-                            {text.length > 1700 && !streaming && (
-                                <span className="text-amber-400 animate-pulse">&gt;&gt; [处理中] 智能拆分 -&gt; 逐段生成 -&gt; 音频融合</span>
-                            )}
-                            <span className="text-violet-400 animate-pulse">&gt;&gt; 数据流传输中...</span>
-                        </>
-                    )}
-
-                    {audioUrl && !loading && !streaming && (
-                         <>
-                            <span className="text-slate-500">&gt;&gt; 传输完成</span>
-                            <span className="text-emerald-400 font-bold">&gt;&gt; √ 音频生成成功</span>
-                            <span className="text-slate-500">&gt;&gt; 资源已加载到播放器</span>
-                         </>
-                    )}
-                    
-                    {errorMsg && (
-                        <span className="text-rose-500 font-bold">&gt;&gt; 错误: {errorMsg}</span>
-                    )}
+                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-32">
+                    {consoleLogs.map((log, i) => (
+                        <div key={i} className="text-slate-300">{log}</div>
+                    ))}
+                    {errorMsg && <div className="text-rose-500 font-bold">&gt;&gt; 错误: {errorMsg}</div>}
                 </div>
              </div>
           </div>
-
         </div>
       </div>
 
@@ -494,40 +492,121 @@ const VoiceStudio: React.FC = () => {
         <div className="flex-1 p-4 md:p-8 overflow-y-auto">
            <div className="max-w-4xl mx-auto h-full flex flex-col gap-6">
               
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 min-h-[300px]">
-                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                    <div className="flex items-center gap-2">
-                        <Languages className="w-4 h-4 text-slate-400" />
-                        <span className="text-xs font-bold text-slate-600 uppercase">文本输入</span>
-                    </div>
-                    <span className="text-xs font-mono text-slate-400">{text.length} chars</span>
-                </div>
-                <textarea 
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  className="flex-1 p-6 text-slate-700 text-base leading-relaxed resize-none outline-none font-medium"
-                  placeholder="在此输入或粘贴需要转换的文本..."
-                />
+              {/* Stepper / Controls for Split Flow */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                      {isSplitMode ? (
+                          <div className="flex items-center gap-2">
+                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 1 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>1. 拆分</span>
+                              <ArrowRight className="w-3 h-3 text-slate-300" />
+                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 2 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>2. 生成</span>
+                              <ArrowRight className="w-3 h-3 text-slate-300" />
+                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 3 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>3. 合并</span>
+                          </div>
+                      ) : (
+                          <span className="text-sm font-bold text-slate-500">普通模式</span>
+                      )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                      {!isSplitMode && (
+                          <button 
+                            onClick={handleSplitText}
+                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
+                            title="文本超过1700字时建议使用"
+                          >
+                              <Split className="w-3.5 h-3.5" /> 拆分文本
+                          </button>
+                      )}
+                      {isSplitMode && step === 2 && (
+                          <button 
+                            onClick={handleGenerateDual}
+                            disabled={loading}
+                            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-violet-500/20"
+                          >
+                              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 
+                              语音生成 (2段)
+                          </button>
+                      )}
+                      {isSplitMode && step === 3 && (
+                          <button 
+                            onClick={handleMerge}
+                            disabled={loading}
+                            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-fuchsia-500/20"
+                          >
+                              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />} 
+                              合并语音 & 上传
+                          </button>
+                      )}
+                  </div>
               </div>
 
-              {/* Action Bar */}
+              {/* Text Input Area */}
+              <div className="flex-1 flex flex-col min-h-[300px]">
+                {isSplitMode ? (
+                    <div className="flex gap-4 h-full">
+                        <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
+                            <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
+                                <span className="text-xs font-bold text-slate-500">第一部分</span>
+                                <span className="text-xs font-mono text-slate-400">{textPart1.length} chars</span>
+                            </div>
+                            <textarea 
+                                value={textPart1}
+                                onChange={(e) => setTextPart1(e.target.value)}
+                                className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
+                            />
+                            {audioUrl1 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl1} className="w-full h-8" /></div>}
+                        </div>
+                        <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
+                            <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
+                                <span className="text-xs font-bold text-slate-500">第二部分</span>
+                                <span className="text-xs font-mono text-slate-400">{textPart2.length} chars</span>
+                            </div>
+                            <textarea 
+                                value={textPart2}
+                                onChange={(e) => setTextPart2(e.target.value)}
+                                className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
+                            />
+                            {audioUrl2 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl2} className="w-full h-8" /></div>}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 h-full">
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+                            <div className="flex items-center gap-2">
+                                <Languages className="w-4 h-4 text-slate-400" />
+                                <span className="text-xs font-bold text-slate-600 uppercase">文本输入</span>
+                            </div>
+                            <span className="text-xs font-mono text-slate-400">
+                                {text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字
+                            </span>
+                        </div>
+                        <textarea 
+                          value={text}
+                          onChange={(e) => setText(e.target.value)}
+                          className="flex-1 p-6 text-slate-700 text-base leading-relaxed resize-none outline-none font-medium"
+                          placeholder="在此输入或粘贴需要转换的文本..."
+                        />
+                    </div>
+                )}
+              </div>
+
+              {/* Bottom Action Bar */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4 sticky bottom-6">
-                 {audioUrl && (
+                 {finalAudioUrl && (
                    <div className="flex items-center gap-4 flex-1 w-full md:w-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
-                      <audio ref={audioRef} controls className="w-full h-8 outline-none" src={audioUrl} />
-                      <a href={audioUrl} download={`tts_${Date.now()}.mp3`} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
+                      <audio ref={audioRef} controls className="w-full h-8 outline-none" src={finalAudioUrl} />
+                      <a href={finalAudioUrl} download={`tts_${Date.now()}.mp3`} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
                         <Download className="w-4 h-4" />
                       </a>
                       
-                      {/* Save To Project Button - Only visible if project context exists and audio is persistent */}
-                      {projectId && !audioUrl.startsWith('blob:') && (
+                      {projectId && !finalAudioUrl.startsWith('blob:') && (
                          <>
                             <div className="w-px h-4 bg-slate-200 mx-2" />
                             <button 
-                                onClick={handleSaveToProject}
+                                onClick={() => handleSaveToProject()}
                                 disabled={savingToProject}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
-                                title={`将当前音频保存至项目: ${projectTitle}`}
                             >
                                 {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                                 保存到项目
@@ -538,25 +617,31 @@ const VoiceStudio: React.FC = () => {
                  )}
                  
                  <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-                    {errorMsg && <span className="text-xs font-bold text-rose-500 mr-2">{errorMsg}</span>}
-                    
-                    <button 
-                      onClick={handlePreview}
-                      disabled={loading || streaming || !text}
-                      className="px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-white border border-slate-200 hover:border-violet-300 hover:text-violet-600 transition-all flex items-center gap-2 disabled:opacity-50"
-                    >
-                       {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                       试听片段
-                    </button>
-                    
-                    <button 
-                      onClick={handleGenerate}
-                      disabled={loading || streaming || !text}
-                      className="px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-slate-900 hover:bg-violet-600 transition-all shadow-lg hover:shadow-violet-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                       {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings2 className="w-4 h-4" />}
-                       生成完整音频
-                    </button>
+                    {!isSplitMode ? (
+                        <>
+                            <button 
+                              onClick={handlePreview}
+                              disabled={loading || streaming || !text}
+                              className="px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-white border border-slate-200 hover:border-violet-300 hover:text-violet-600 transition-all flex items-center gap-2 disabled:opacity-50"
+                            >
+                               {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                               试听片段
+                            </button>
+                            
+                            <button 
+                              onClick={handleGenerateSingle}
+                              disabled={loading || streaming || !text}
+                              className="px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-slate-900 hover:bg-violet-600 transition-all shadow-lg hover:shadow-violet-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings2 className="w-4 h-4" />}
+                               生成完整音频
+                            </button>
+                        </>
+                    ) : (
+                        <div className="text-xs text-slate-400 font-bold italic">
+                            分步模式进行中...
+                        </div>
+                    )}
                  </div>
               </div>
 
