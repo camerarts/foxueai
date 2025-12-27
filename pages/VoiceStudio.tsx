@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2 } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -33,6 +33,11 @@ const VoiceStudio: React.FC = () => {
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
   
+  // Project Context State
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectTitle, setProjectTitle] = useState<string | null>(null);
+  const [savingToProject, setSavingToProject] = useState(false);
+  
   // Operation State
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -43,6 +48,12 @@ const VoiceStudio: React.FC = () => {
   useEffect(() => {
     if (location.state?.text) {
       setText(location.state.text);
+    }
+    if (location.state?.projectId) {
+        setProjectId(location.state.projectId);
+    }
+    if (location.state?.projectTitle) {
+        setProjectTitle(location.state.projectTitle);
     }
     loadSavedVoices();
   }, [location]);
@@ -185,6 +196,38 @@ const VoiceStudio: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSaveToProject = async () => {
+      if (!audioUrl || !projectId) return;
+      if (audioUrl.startsWith('blob:')) {
+          alert("请先点击“生成完整音频”以获取可保存的持久化文件。");
+          return;
+      }
+
+      setSavingToProject(true);
+      try {
+          const project = await storage.getProject(projectId);
+          if (project) {
+               const updated = { 
+                   ...project, 
+                   audioFile: audioUrl,
+                   moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
+               };
+               await storage.saveProject(updated);
+               
+               // Trigger background sync
+               storage.uploadProjects().catch(console.error);
+
+               alert(`已成功保存到项目 "${project.title}" 的音频文件中！`);
+          } else {
+              alert("找不到对应项目，可能已被删除。");
+          }
+      } catch(e: any) {
+          alert("保存失败: " + e.message);
+      } finally {
+          setSavingToProject(false);
+      }
   };
 
   // Determine if the current custom ID is already saved
@@ -358,9 +401,25 @@ const VoiceStudio: React.FC = () => {
                  {audioUrl && (
                    <div className="flex items-center gap-4 flex-1 w-full md:w-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
                       <audio ref={audioRef} controls className="w-full h-8 outline-none" src={audioUrl} />
-                      <a href={audioUrl} download={`tts_${Date.now()}.mp3`} className="p-2 text-slate-400 hover:text-violet-600 transition-colors">
+                      <a href={audioUrl} download={`tts_${Date.now()}.mp3`} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
                         <Download className="w-4 h-4" />
                       </a>
+                      
+                      {/* Save To Project Button - Only visible if project context exists and audio is persistent */}
+                      {projectId && !audioUrl.startsWith('blob:') && (
+                         <>
+                            <div className="w-px h-4 bg-slate-200 mx-2" />
+                            <button 
+                                onClick={handleSaveToProject}
+                                disabled={savingToProject}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
+                                title={`将当前音频保存至项目: ${projectTitle}`}
+                            >
+                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                保存到项目
+                            </button>
+                         </>
+                      )}
                    </div>
                  )}
                  
