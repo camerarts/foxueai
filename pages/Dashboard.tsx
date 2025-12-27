@@ -164,7 +164,8 @@ const Dashboard: React.FC = () => {
       const hasTitles = !!p.titles && p.titles.length > 0;
       const hasAudio = !!p.audioFile; 
       const hasSummary = !!p.summary && p.summary.length > 0;
-      const hasCover = !!p.coverOptions && p.coverOptions.length > 0;
+      // Change: Check prompt existence instead of image or options
+      const hasCover = !!p.coverImage?.prompt;
       return hasScript && hasTitles && hasAudio && hasSummary && hasCover;
   };
 
@@ -255,7 +256,8 @@ const Dashboard: React.FC = () => {
                             const hasTitles = project.titles && project.titles.length > 0;
                             const hasAudio = !!project.audioFile;
                             const hasSummary = !!project.summary && project.summary.length > 0;
-                            const hasCover = project.coverOptions && project.coverOptions.length > 0;
+                            // Change: Check prompt existence instead of image or options
+                            const hasCover = !!project.coverImage?.prompt;
 
                             return (
                                 <tr 
@@ -310,7 +312,7 @@ const Dashboard: React.FC = () => {
                                             />
                                             {/* Bottom Right: Cover */}
                                             <div 
-                                                title={`封面策划: ${hasCover ? '已完成' : '未完成'}`}
+                                                title={`封面策划: ${hasCover ? '已生成提示词' : '未生成提示词'}`}
                                                 className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-white shadow-sm transition-colors ${hasCover ? 'bg-emerald-500' : 'bg-rose-400'}`} 
                                             />
                                         </div>
