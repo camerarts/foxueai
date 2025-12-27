@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PromptTemplate, DEFAULT_PROMPTS } from '../types';
 import * as storage from '../services/storageService';
-import { Save, RefreshCw, AlertTriangle, ClipboardPaste, Check, Maximize2, X, Loader2, Copy, Cloud, CloudCheck, AlertCircle, Clock } from 'lucide-react';
+import { Save, RefreshCw, AlertTriangle, ClipboardPaste, Check, Maximize2, X, Loader2, Copy, Cloud, CloudCheck, AlertCircle, Clock, Info } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const [prompts, setPrompts] = useState<Record<string, PromptTemplate>>({});
@@ -164,7 +164,7 @@ const Settings: React.FC = () => {
 
             return (
               <div key={key} className="bg-white border border-slate-200 rounded-[32px] p-6 shadow-sm hover:shadow-md transition-all flex flex-col">
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex justify-between items-start mb-4">
                   <div className="flex items-start gap-3">
                     <span className="w-8 h-8 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
                         {index + 1}
@@ -172,15 +172,6 @@ const Settings: React.FC = () => {
                     <div>
                         <h3 className="text-base font-black text-slate-800 tracking-tight">{displayName}</h3>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{displayDesc}</p>
-                        {variables.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 mt-2.5">
-                                {variables.map(v => (
-                                    <code key={v} className="text-[10px] font-mono text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100/50 select-all cursor-text" title="系统注入变量">
-                                        {v}
-                                    </code>
-                                ))}
-                            </div>
-                        )}
                     </div>
                   </div>
                   <div className="flex gap-1">
@@ -188,6 +179,16 @@ const Settings: React.FC = () => {
                       <button onClick={() => handlePaste(key)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded-xl transition-all"><ClipboardPaste className="w-4 h-4" /></button>
                   </div>
                 </div>
+                
+                {variables.length > 0 && (
+                    <div className="mb-4 text-[11px] text-slate-500 bg-slate-50 px-3 py-2 rounded-lg border border-slate-100 flex items-start gap-2">
+                        <Info className="w-3.5 h-3.5 text-indigo-500 mt-0.5 shrink-0" />
+                        <span className="leading-relaxed">
+                            <span className="font-bold text-slate-700">系统代码备注：</span>
+                            生成时系统将自动把 {variables.map(v => <code key={v} className="mx-0.5 font-mono text-indigo-600 font-bold bg-indigo-50 px-1 rounded">{v}</code>)} 替换为对应内容。
+                        </span>
+                    </div>
+                )}
                 
                 <div className="relative flex-1 group">
                     <textarea
@@ -214,9 +215,11 @@ const Settings: React.FC = () => {
                 <div className="px-8 py-6 border-b flex justify-between items-center">
                     <div>
                         <h2 className="text-xl font-black text-slate-800">全屏编辑: {DEFAULT_PROMPTS[expandedKey]?.name}</h2>
-                        <div className="flex flex-wrap gap-2 mt-2">
+                        <div className="mt-2 text-xs text-slate-500 flex items-center gap-2">
+                            <span className="font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">系统变量说明</span>
+                            <span>可用代码:</span>
                             {VARIABLE_MAP[expandedKey]?.map(v => (
-                                <code key={v} className="text-xs font-mono text-indigo-500 bg-indigo-50 px-2 py-1 rounded border border-indigo-100/50 select-all">
+                                <code key={v} className="font-mono text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
                                     {v}
                                 </code>
                             ))}
