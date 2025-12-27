@@ -7,39 +7,31 @@ interface Env {
 function splitText(text: string, limit: number): string[] {
   if (text.length <= limit) return [text];
   
-  const chunks = [];
-  let remaining = text;
+  // Calculate split point for the first chunk to stay within limit
+  let splitIdx = text.lastIndexOf('。', limit);
   
-  while (remaining.length > limit) {
-    // Try to split at the last '。' within the limit
-    let splitIdx = remaining.lastIndexOf('。', limit);
-    
-    // Fallback delimiters if '。' not found
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('.', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('！', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('!', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('？', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('?', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('\n', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf('，', limit);
-    if (splitIdx === -1) splitIdx = remaining.lastIndexOf(',', limit);
-    
-    // If absolutely no punctuation found, split at limit
-    if (splitIdx === -1) {
-       splitIdx = limit;
-    } else {
-       splitIdx += 1; // Include the punctuation mark
-    }
-    
-    chunks.push(remaining.substring(0, splitIdx));
-    remaining = remaining.substring(splitIdx);
+  // Fallback delimiters if '。' not found
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('.', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('！', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('!', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('？', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('?', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('\n', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf('，', limit);
+  if (splitIdx === -1) splitIdx = text.lastIndexOf(',', limit);
+  
+  // If absolutely no punctuation found, split at limit
+  if (splitIdx === -1) {
+     splitIdx = limit;
+  } else {
+     splitIdx += 1; // Include the punctuation mark
   }
   
-  if (remaining.length > 0) {
-    chunks.push(remaining);
-  }
-  
-  return chunks;
+  // Return exactly two chunks: the part that fits in limit, and the rest
+  return [
+      text.substring(0, splitIdx),
+      text.substring(splitIdx)
+  ];
 }
 
 export const onRequestPost = async (context: any) => {
