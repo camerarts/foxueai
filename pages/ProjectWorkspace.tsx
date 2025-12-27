@@ -320,7 +320,7 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
   );
 };
 
-const NODE_WIDTH = 280;
+const NODE_WIDTH = 294;
 const NODE_HEIGHT = 160;
 const NODES_CONFIG = [
   { id: 'input', label: '项目输入', panelTitle: '项目策划', icon: Layout, color: 'blue', description: '定义主题与基调', x: 50, y: 300 },
