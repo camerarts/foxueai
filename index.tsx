@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 
 interface ErrorBoundaryProps {
-  // Fix: Made children optional to avoid "missing but required" JSX error
   children?: React.ReactNode;
 }
 
@@ -12,10 +11,7 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// Fix: Explicitly declare state and props if the compiler fails to infer them from React.Component
-class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState;
-
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -30,7 +26,6 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   render() {
-    // Fix: Access state and props via destructuring for clarity and to assist type inference
     const { hasError, error } = this.state;
     const { children } = this.props;
 

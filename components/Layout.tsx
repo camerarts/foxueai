@@ -135,9 +135,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Link to="/voice" className={`flex flex-col items-center justify-center py-2 w-full rounded-xl transition-all gap-1 ${isActive('/voice') ? 'bg-fuchsia-50 text-fuchsia-600' : 'text-slate-400 hover:text-slate-600'}`}>
             <Mic className="w-5 h-5" /><span className="text-[10px] font-medium">语音</span>
           </Link>
+        </nav>
 
-          <div className="mt-auto w-full flex flex-col gap-2 pt-4 border-t border-slate-100 items-center">
-             
+        {/* Footer Actions - Moved outside of scrolling nav to allow tooltip overflow */}
+        <div className="w-full flex flex-col gap-2 pt-4 border-t border-slate-100 items-center px-2 bg-white z-10">
              {/* Key Configuration Button */}
              <button 
                 onClick={() => setShowKeyModal(true)}
@@ -148,7 +149,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <span className="text-[10px] font-medium">密钥</span>
              </button>
 
-             <div className="relative w-full px-2" onMouseEnter={() => setShowTooltip(true)} onMouseLeave={() => setShowTooltip(false)}>
+             <div className="relative w-full" onMouseEnter={() => setShowTooltip(true)} onMouseLeave={() => setShowTooltip(false)}>
                 <button
                     onClick={handleUpload}
                     disabled={!!syncing}
@@ -160,14 +161,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 
                 {/* Custom Granular Tooltip */}
                 {showTooltip && unsavedModules.length > 0 && (
-                    <div className="absolute left-full ml-2 top-0 z-[100] w-40 bg-slate-900 text-white rounded-xl shadow-2xl p-3 animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-none">
+                    <div className="absolute left-full ml-2 top-0 z-[100] w-max bg-slate-900 text-white rounded-xl shadow-2xl p-3 animate-in fade-in slide-in-from-left-2 duration-200 pointer-events-none">
                         <div className="flex items-center gap-1.5 mb-2 text-[10px] font-black text-rose-400 uppercase tracking-widest border-b border-white/10 pb-1.5">
                             <AlertCircle className="w-3 h-3" /> 待上传项
                         </div>
-                        <ul className="space-y-1.5">
+                        <ul className="space-y-1.5 min-w-[80px]">
                             {unsavedModules.map(m => (
-                                <li key={m} className="text-[11px] font-bold flex items-center gap-2">
-                                    <div className="w-1 h-1 rounded-full bg-rose-500" /> {m}
+                                <li key={m} className="text-[11px] font-bold flex items-center gap-2 whitespace-nowrap">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-rose-500" /> {m}
                                 </li>
                             ))}
                         </ul>
@@ -178,8 +179,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             <button onClick={handleDownload} disabled={!!syncing} className="flex flex-col items-center justify-center py-2 w-full rounded-xl transition-all gap-1 hover:bg-slate-100 text-slate-400"><CloudDownload className="w-5 h-5" /></button>
             <Link to="/settings" className={`flex flex-col items-center justify-center py-2 w-full rounded-xl transition-all ${isActive('/settings') ? 'text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}><Settings className="w-5 h-5" /></Link>
-          </div>
-        </nav>
+        </div>
       </aside>
 
       <main className="flex-1 flex flex-col h-full overflow-hidden w-full relative">

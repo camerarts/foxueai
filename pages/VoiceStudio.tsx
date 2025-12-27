@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const PRESET_VOICES = [
@@ -318,7 +318,8 @@ const VoiceStudio: React.FC = () => {
           
           // Upload merged file to R2 to get a permanent URL
           // We use the storage service logic manually here to upload a Blob
-          const file = new File([mergedBlob], `merged_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+          const fileNameSafe = (projectTitle || `merged_${Date.now()}`).replace(/[\\/:*?"<>|]/g, "_");
+          const file = new File([mergedBlob], `${fileNameSafe}.mp3`, { type: 'audio/mpeg' });
           const uploadedUrl = await storage.uploadFile(file, projectId || 'temp_voice_studio');
           
           setFinalAudioUrl(uploadedUrl);
@@ -370,6 +371,10 @@ const VoiceStudio: React.FC = () => {
 
   const savedVoiceMatch = savedVoices.find(v => v.id === customVoiceId.trim());
   const isCurrentIdSaved = !!savedVoiceMatch;
+
+  const downloadFileName = projectTitle 
+      ? `${projectTitle.replace(/[\\/:*?"<>|]/g, "_")}.mp3`
+      : `tts_${Date.now()}.mp3`;
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
@@ -506,6 +511,13 @@ const VoiceStudio: React.FC = () => {
                       ) : (
                           <span className="text-sm font-bold text-slate-500">普通模式</span>
                       )}
+                      
+                      {projectTitle && (
+                          <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                              <FolderOpen className="w-3.5 h-3.5 text-blue-500" />
+                              <span className="text-xs font-bold text-slate-600 max-w-[150px] truncate">{projectTitle}</span>
+                          </div>
+                      )}
                   </div>
                   
                   <div className="flex gap-2">
@@ -575,7 +587,9 @@ const VoiceStudio: React.FC = () => {
                         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
                             <div className="flex items-center gap-2">
                                 <Languages className="w-4 h-4 text-slate-400" />
-                                <span className="text-xs font-bold text-slate-600 uppercase">文本输入</span>
+                                <span className="text-xs font-bold text-slate-600 uppercase">
+                                    {projectTitle ? `项目文案: ${projectTitle}` : '文本输入'}
+                                </span>
                             </div>
                             <span className="text-xs font-mono text-slate-400">
                                 {text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字
@@ -596,7 +610,7 @@ const VoiceStudio: React.FC = () => {
                  {finalAudioUrl && (
                    <div className="flex items-center gap-4 flex-1 w-full md:w-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
                       <audio ref={audioRef} controls className="w-full h-8 outline-none" src={finalAudioUrl} />
-                      <a href={finalAudioUrl} download={`tts_${Date.now()}.mp3`} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
+                      <a href={finalAudioUrl} download={downloadFileName} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
                         <Download className="w-4 h-4" />
                       </a>
                       
