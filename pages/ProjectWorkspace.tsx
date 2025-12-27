@@ -312,11 +312,21 @@ const ProjectWorkspace: React.FC = () => {
     return () => { if(saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [id]);
 
-  const updateProjectAndSyncImmediately = (updated: ProjectData) => {
+  const updateProjectAndSyncImmediately = (updated: ProjectData, forceCloudSync = false) => {
       setProject(updated);
       
       // 1. Save Locally Immediately (Fixes refresh data loss)
       storage.saveProject(updated).catch(console.error);
+
+      if (forceCloudSync) {
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          setSyncStatus('saving');
+          // Immediate cloud upload
+          storage.uploadProjects()
+              .then(() => setSyncStatus('synced'))
+              .catch(() => setSyncStatus('error'));
+          return;
+      }
 
       setSyncStatus('pending'); 
       
@@ -502,7 +512,7 @@ const ProjectWorkspace: React.FC = () => {
             audioFile: url, 
             moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() } 
         };
-        updateProjectAndSyncImmediately(updated);
+        updateProjectAndSyncImmediately(updated, true); // Force immediate sync for uploads
     } catch (err: any) {
         alert(`音频上传失败: ${err.message}`);
     } finally {
@@ -639,7 +649,7 @@ const ProjectWorkspace: React.FC = () => {
                         title="视频脚本" 
                         content={project.script} 
                         showStats={true} 
-                        onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v })} 
+                        onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v }, true)} 
                         autoCleanAsterisks={true} 
                         extraActions={
                             <a 
@@ -742,7 +752,7 @@ const ProjectWorkspace: React.FC = () => {
                         </div>
                      </div>
                  )}
-                 {selectedNodeId === 'summary' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="简介标签" content={project.summary} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, summary: v })} /></div>}
+                 {selectedNodeId === 'summary' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="简介标签" content={project.summary} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, summary: v }, true)} /></div>}
                  {selectedNodeId === 'cover' && (
                      <div className="p-6 h-full overflow-hidden flex flex-col gap-6">
                         <div className="h-[40%] shrink-0 min-h-[200px]">
