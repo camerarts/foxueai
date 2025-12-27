@@ -244,15 +244,20 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
   const clean = (t: string) => autoCleanAsterisks ? t.replace(/\*/g, '') : t;
   const [val, setVal] = useState(clean(content || ''));
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { if (!dirty) setVal(clean(content || '')); }, [content, dirty]);
+  
+  useEffect(() => { 
+      if (!dirty) setVal(clean(content || '')); 
+  }, [content, dirty]);
+
   const stats = (t: string) => `【共${t.length}字符，汉字${(t.match(/[\u4e00-\u9fa5]/g) || []).length}个】`;
+  
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col h-full max-h-[600px]">
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3"><h4 className="text-xs font-bold text-slate-500 uppercase">{title}</h4>{showStats && <span className="text-[10px] bg-white px-2 py-0.5 rounded border font-bold text-indigo-600 border-indigo-100">{stats(val)}</span>}</div>
         <div className="flex items-center gap-2">
             {extraActions}
-            {!readOnly && onSave && dirty && <button onClick={() => { onSave(val); setDirty(false); }} className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">保存 (8s)</button>}
+            {!readOnly && onSave && dirty && <button onClick={() => { onSave(val); setDirty(false); }} className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">保存</button>}
             <RowCopyButton text={val} />
         </div>
       </div>
@@ -309,15 +314,18 @@ const ProjectWorkspace: React.FC = () => {
 
   const updateProjectAndSyncImmediately = (updated: ProjectData) => {
       setProject(updated);
-      setSyncStatus('pending'); // Update status to pending
+      
+      // 1. Save Locally Immediately (Fixes refresh data loss)
+      storage.saveProject(updated).catch(console.error);
+
+      setSyncStatus('pending'); 
       
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       
-      // 8-second debounce
+      // 2. Debounce Cloud Sync (8s)
       saveTimerRef.current = setTimeout(async () => {
           setSyncStatus('saving');
           try {
-              await storage.saveProject(updated);
               await storage.uploadProjects();
               setSyncStatus('synced');
           } catch { 
