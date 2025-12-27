@@ -14,6 +14,8 @@ interface ErrorBoundaryState {
 
 // Fix: Explicitly declare state and props if the compiler fails to infer them from React.Component
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public override state: ErrorBoundaryState;
+
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };

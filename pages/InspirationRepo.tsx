@@ -3,8 +3,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Inspiration, ProjectData, ProjectStatus } from '../types';
 import * as storage from '../services/storageService';
-import * as gemini from '../services/geminiService';
-import { Lightbulb, Plus, Trash2, Loader2, Sparkles, X, Save, FileSpreadsheet, ArrowLeft, CheckCircle2, Star, ArrowUpDown, ArrowUp, ArrowDown, Rocket, CheckSquare, Square, Filter, Download, Cloud, CloudCheck, AlertCircle, Clock } from 'lucide-react';
+import { Lightbulb, Plus, Trash2, Loader2, X, Save, ArrowLeft, Star, ArrowUpDown, ArrowUp, ArrowDown, Rocket, CheckSquare, Square, Filter, Download, Cloud, CloudCheck, Clock, FileText } from 'lucide-react';
 
 const InspirationRepo: React.FC = () => {
   const navigate = useNavigate();
@@ -29,15 +28,10 @@ const InspirationRepo: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
 
-  // UI Flow State
-  const [viewMode, setViewMode] = useState<'input' | 'single' | 'batch'>('input');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   
   // Form Data
-  const [rawContent, setRawContent] = useState('');
-  const [extracting, setExtracting] = useState(false);
   const [singleData, setSingleData] = useState<Partial<Inspiration>>({});
-  const [batchData, setBatchData] = useState<Partial<Inspiration>[]>([]);
 
   // Activity Tracking Refs
   const lastActivityRef = useRef(Date.now());
@@ -46,8 +40,8 @@ const InspirationRepo: React.FC = () => {
 
   // Update busy ref based on state
   useEffect(() => {
-      isBusyRef.current = loading || extracting || showModal;
-  }, [loading, extracting, showModal]);
+      isBusyRef.current = loading || showModal;
+  }, [loading, showModal]);
 
   // Activity Listeners
   useEffect(() => {
@@ -276,75 +270,21 @@ const InspirationRepo: React.FC = () => {
 
   const resetModal = () => {
     setShowModal(false);
-    setRawContent('');
     setSingleData({});
-    setBatchData([]);
-    setViewMode('input');
-    setExtracting(false);
-  };
-
-  const handleAnalyze = async () => {
-    if (!rawContent.trim()) return;
-    const rows = rawContent.trim().split('\n').filter(r => r.trim());
-    
-    if (rows.some(r => r.includes('\t'))) {
-        const parsed: Partial<Inspiration>[] = [];
-        let startIndex = 0;
-        let catIdx = 1; 
-        let titleIdx = 2;
-        let ratingIdx = 3;
-
-        for(let i=0; i<Math.min(rows.length, 5); i++) {
-            const rowStr = rows[i];
-            if (rowStr.includes('分类') || rowStr.includes('标题')) {
-                const cols = rowStr.split('\t');
-                const cIdx = cols.findIndex(c => c.includes('分类'));
-                const tIdx = cols.findIndex(c => c.includes('标题'));
-                const rIdx = cols.findIndex(c => c.includes('评分'));
-                if (cIdx !== -1) catIdx = cIdx;
-                if (tIdx !== -1) titleIdx = tIdx;
-                if (rIdx !== -1) ratingIdx = rIdx;
-                startIndex = i + 1; 
-                break;
-            }
-        }
-
-        for (let i = startIndex; i < rows.length; i++) {
-            const cols = rows[i].split('\t').map(c => c.trim());
-            const category = cols[catIdx];
-            const title = cols[titleIdx];
-            const rating = cols[ratingIdx];
-            if (title) {
-                parsed.push({ category: category || '未分类', viralTitle: title, rating: rating || '', content: rows[i] });
-            }
-        }
-        if (parsed.length > 0) { setBatchData(parsed); setViewMode('batch'); return; }
-    }
-
-    setExtracting(true);
-    try {
-      const prompts = await storage.getPrompts();
-      const template = prompts.INSPIRATION_EXTRACT?.template || '';
-      const promptText = template.replace('{{content}}', rawContent);
-      const result = await gemini.generateJSON<{category: string, trafficLogic: string, viralTitle: string}>(promptText, {
-        type: "OBJECT",
-        properties: { category: {type: "STRING"}, trafficLogic: {type: "STRING"}, viralTitle: {type: "STRING"} }
-      });
-      setSingleData({ content: rawContent, category: result.category, trafficLogic: result.trafficLogic, viralTitle: result.viralTitle });
-      setViewMode('single');
-    } catch (e) {
-      alert("AI 提取失败，请重试或检查内容。");
-    } finally { setExtracting(false); }
   };
 
   const handleSaveSingle = async () => {
-    if (!singleData.category || !singleData.viralTitle) return;
+    if (!singleData.viralTitle) {
+        alert("请输入灵感标题");
+        return;
+    }
+    
     const newItem: Inspiration = {
       id: crypto.randomUUID(),
-      content: singleData.content || rawContent,
+      content: singleData.content || '',
       category: singleData.category || '未分类',
       trafficLogic: singleData.trafficLogic || '',
-      viralTitle: singleData.viralTitle || '',
+      viralTitle: singleData.viralTitle,
       rating: singleData.rating || '',
       createdAt: Date.now()
     };
@@ -352,24 +292,6 @@ const InspirationRepo: React.FC = () => {
     setInspirations(prev => [newItem, ...prev]);
     resetModal();
     // 录入灵感后 8 秒保存同步
-    await handleAutoPush();
-  };
-
-  const handleSaveBatch = async () => {
-    if (batchData.length === 0) return;
-    const newItems: Inspiration[] = batchData.map(item => ({
-        id: crypto.randomUUID(),
-        content: item.content || '',
-        category: item.category || '未分类',
-        trafficLogic: '',
-        viralTitle: item.viralTitle || '',
-        rating: item.rating || '',
-        createdAt: Date.now()
-    }));
-    setInspirations(prev => [...newItems, ...prev]);
-    resetModal();
-    for (const item of newItems) await storage.saveInspiration(item);
-    // 批量导入后 8 秒保存同步
     await handleAutoPush();
   };
 
@@ -473,108 +395,76 @@ const InspirationRepo: React.FC = () => {
       
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
               <h3 className="font-bold text-lg text-slate-800">记录新灵感</h3>
               <button onClick={resetModal} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             
-            <div className="p-6 overflow-y-auto">
-              {viewMode === 'input' && (
-                <div className="space-y-4">
-                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 leading-relaxed">
-                    <p className="font-bold mb-1 flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" /> 智能识别模式</p>
-                    <p>1. 粘贴任意包含标题的文本，AI 将自动提取核心信息。</p>
-                    <p>2. 支持从 Excel/表格 直接复制多行数据（需包含标题/分类列），自动进入批量导入模式。</p>
-                  </div>
-                  <textarea
-                    autoFocus
-                    value={rawContent}
-                    onChange={(e) => setRawContent(e.target.value)}
-                    placeholder="在此粘贴文本内容..."
-                    className="w-full h-48 p-4 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none text-sm"
-                  />
+            <div className="p-6 space-y-5 overflow-y-auto">
+                <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">灵感标题 (必填)</label>
+                    <input 
+                        autoFocus
+                        value={singleData.viralTitle || ''} 
+                        onChange={e => setSingleData({...singleData, viralTitle: e.target.value})} 
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold shadow-sm focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none" 
+                        placeholder="输入核心想法或视频标题..."
+                    />
                 </div>
-              )}
 
-              {viewMode === 'single' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">分类</label>
-                      <input value={singleData.category || ''} onChange={e => setSingleData({...singleData, category: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">分类</label>
+                      <input 
+                        value={singleData.category || ''} 
+                        onChange={e => setSingleData({...singleData, category: e.target.value})} 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:bg-white focus:border-amber-400 transition-all" 
+                        placeholder="例如：科技、Vlog..."
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">预估评分</label>
-                      <input value={singleData.rating || ''} onChange={e => setSingleData({...singleData, rating: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" placeholder="0-10" />
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">预估评分</label>
+                      <input 
+                        value={singleData.rating || ''} 
+                        onChange={e => setSingleData({...singleData, rating: e.target.value})} 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium outline-none focus:bg-white focus:border-amber-400 transition-all" 
+                        placeholder="0-10" 
+                      />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">爆款标题</label>
-                    <input value={singleData.viralTitle || ''} onChange={e => setSingleData({...singleData, viralTitle: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold" />
-                  </div>
-                  <div>
-                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">底层逻辑 (可选)</label>
-                     <input value={singleData.trafficLogic || ''} onChange={e => setSingleData({...singleData, trafficLogic: e.target.value})} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">原始内容</label>
-                    <div className="p-3 bg-slate-50 rounded-lg text-xs text-slate-500 max-h-24 overflow-y-auto">{singleData.content}</div>
-                  </div>
                 </div>
-              )}
 
-              {viewMode === 'batch' && (
-                <div className="space-y-4">
-                   <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-slate-700">识别到 {batchData.length} 条数据</span>
-                      <span className="text-xs text-slate-400">请确认解析结果</span>
-                   </div>
-                   <div className="max-h-60 overflow-y-auto border rounded-xl">
-                      <table className="w-full text-left text-xs">
-                         <thead className="bg-slate-50 sticky top-0">
-                            <tr>
-                               <th className="p-2 border-b">分类</th>
-                               <th className="p-2 border-b">标题</th>
-                               <th className="p-2 border-b">评分</th>
-                            </tr>
-                         </thead>
-                         <tbody className="divide-y">
-                            {batchData.map((item, idx) => (
-                               <tr key={idx}>
-                                  <td className="p-2 text-slate-500">{item.category}</td>
-                                  <td className="p-2 font-bold text-slate-700">{item.viralTitle}</td>
-                                  <td className="p-2 text-slate-500">{item.rating}</td>
-                               </tr>
-                            ))}
-                         </tbody>
-                      </table>
-                   </div>
+                <div>
+                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5">底层逻辑 (可选)</label>
+                   <input 
+                        value={singleData.trafficLogic || ''} 
+                        onChange={e => setSingleData({...singleData, trafficLogic: e.target.value})} 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-amber-400 transition-all" 
+                        placeholder="为什么这个话题会火？"
+                   />
                 </div>
-              )}
+
+                <div>
+                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
+                       <FileText className="w-3.5 h-3.5" /> 备注 / 详细内容
+                   </label>
+                   <textarea
+                        value={singleData.content || ''}
+                        onChange={(e) => setSingleData({...singleData, content: e.target.value})}
+                        placeholder="在此记录更多细节..."
+                        className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:border-amber-400 transition-all resize-none text-sm"
+                   />
+                </div>
             </div>
 
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              {viewMode === 'input' ? (
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                <button onClick={resetModal} className="px-5 py-2.5 text-slate-500 font-bold hover:bg-white hover:shadow-sm rounded-xl transition-all">取消</button>
                 <button 
-                  onClick={handleAnalyze} 
-                  disabled={extracting || !rawContent.trim()}
-                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold shadow-lg shadow-amber-500/20 disabled:opacity-50 flex items-center gap-2 transition-all"
+                  onClick={handleSaveSingle}
+                  className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all hover:-translate-y-0.5"
                 >
-                  {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  智能提取 / 解析
+                  <Save className="w-4 h-4" /> 确认保存
                 </button>
-              ) : (
-                <>
-                  <button onClick={() => setViewMode('input')} className="px-4 py-2.5 text-slate-500 font-bold hover:bg-white rounded-xl transition-all">返回修改</button>
-                  <button 
-                    onClick={viewMode === 'single' ? handleSaveSingle : handleSaveBatch}
-                    className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all"
-                  >
-                    <Save className="w-4 h-4" /> 确认保存
-                  </button>
-                </>
-              )}
             </div>
           </div>
         </div>
