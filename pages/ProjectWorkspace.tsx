@@ -652,14 +652,12 @@ const ProjectWorkspace: React.FC = () => {
                         onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v }, true)} 
                         autoCleanAsterisks={true} 
                         extraActions={
-                            <a 
-                                href="https://elevenlabs.io/app/speech-synthesis/text-to-speech" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
+                            <button 
+                                onClick={() => navigate('/voice', { state: { text: project.script } })} 
                                 className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:text-white hover:bg-slate-900 bg-white border border-slate-200 hover:border-slate-900 rounded-lg transition-all"
                             >
                                 <Mic className="w-3 h-3" /> 去生成语音
-                            </a>
+                            </button>
                         }
                     />
                  </div>}

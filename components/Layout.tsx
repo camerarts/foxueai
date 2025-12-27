@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Video, Plus, Image as ImageIcon, Lightbulb, LogOut, CloudUpload, CloudDownload, Loader2, CheckCircle2, XCircle, Circle, Menu, X, Sparkles, Type, Archive, AlertCircle, Key } from 'lucide-react';
+import { LayoutDashboard, Settings, Video, Plus, Image as ImageIcon, Lightbulb, LogOut, CloudUpload, CloudDownload, Loader2, CheckCircle2, XCircle, Circle, Menu, X, Sparkles, Type, Archive, AlertCircle, Key, Mic } from 'lucide-react';
 import * as storage from '../services/storageService';
 import ApiKeyConfigModal from './ApiKeyConfigModal';
 
@@ -131,6 +131,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </Link>
           <Link to="/archive" className={`flex flex-col items-center justify-center py-2 w-full rounded-xl transition-all gap-1 ${isActive('/archive') ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}>
             <Archive className="w-5 h-5" /><span className="text-[10px] font-medium">归档</span>
+          </Link>
+          <Link to="/voice" className={`flex flex-col items-center justify-center py-2 w-full rounded-xl transition-all gap-1 ${isActive('/voice') ? 'bg-fuchsia-50 text-fuchsia-600' : 'text-slate-400 hover:text-slate-600'}`}>
+            <Mic className="w-5 h-5" /><span className="text-[10px] font-medium">语音</span>
           </Link>
 
           <div className="mt-auto w-full flex flex-col gap-2 pt-4 border-t border-slate-100 items-center">

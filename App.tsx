@@ -13,6 +13,7 @@ import AuthGuard from './components/AuthGuard';
 import LandingPage from './pages/LandingPage';
 import CreateProject from './pages/CreateProject';
 import AiTitles from './pages/AiTitles';
+import VoiceStudio from './pages/VoiceStudio';
 
 // Fix: Updated ProtectedRoute to make children optional or use PropsWithChildren to satisfy JSX requirements
 const ProtectedRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
@@ -32,6 +33,7 @@ const App: React.FC = () => {
         <Route path="/images" element={<ProtectedRoute><ImageWorkshopList /></ProtectedRoute>} />
         <Route path="/inspiration" element={<ProtectedRoute><InspirationRepo /></ProtectedRoute>} />
         <Route path="/ai-titles" element={<ProtectedRoute><AiTitles /></ProtectedRoute>} />
+        <Route path="/voice" element={<ProtectedRoute><VoiceStudio /></ProtectedRoute>} />
         <Route path="/archive" element={<ProtectedRoute><ArchiveRepo /></ProtectedRoute>} />
         <Route path="/project/:id" element={<ProtectedRoute><ProjectWorkspace /></ProtectedRoute>} />
         <Route path="/project/:id/images" element={<ProtectedRoute><StoryboardImages /></ProtectedRoute>} />
