@@ -164,8 +164,10 @@ const Dashboard: React.FC = () => {
       const hasTitles = !!p.titles && p.titles.length > 0;
       const hasAudio = !!p.audioFile; 
       const hasSummary = !!p.summary && p.summary.length > 0;
-      // Change: Check prompt existence instead of image or options
-      const hasCover = !!p.coverImage?.prompt;
+      
+      // 核心修改：只要有 prompt 且不为空字符串即视为完成
+      const hasCover = Boolean(p.coverImage?.prompt && p.coverImage.prompt.trim().length > 0);
+      
       return hasScript && hasTitles && hasAudio && hasSummary && hasCover;
   };
 
@@ -256,8 +258,9 @@ const Dashboard: React.FC = () => {
                             const hasTitles = project.titles && project.titles.length > 0;
                             const hasAudio = !!project.audioFile;
                             const hasSummary = !!project.summary && project.summary.length > 0;
-                            // Change: Check prompt existence instead of image or options
-                            const hasCover = !!project.coverImage?.prompt;
+                            
+                            // 封面逻辑：只要有提示词内容即为完成
+                            const hasCover = Boolean(project.coverImage?.prompt && project.coverImage.prompt.trim().length > 0);
 
                             return (
                                 <tr 
