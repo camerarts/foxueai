@@ -16,8 +16,9 @@ const PRESET_VOICES = [
 
 const TTS_MODELS = [
   { id: 'eleven_multilingual_v2', name: 'Eleven Multilingual v2' },
-  { id: 'eleven_turbo_v2_5', name: 'Eleven v3 (Alpha) / Turbo v2.5' },
   { id: 'eleven_flash_v2_5', name: 'Eleven Flash v2.5' },
+  { id: 'eleven_turbo_v2_5', name: 'Eleven Turbo v2.5' },
+  { id: 'eleven_multilingual_v3', name: 'Eleven v3 (Alpha)' },
 ];
 
 interface CustomVoice {
@@ -38,7 +39,7 @@ const VoiceStudio: React.FC = () => {
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
-  const [modelId, setModelId] = useState(TTS_MODELS[1].id); // Default to Turbo v2.5
+  const [modelId, setModelId] = useState(TTS_MODELS[3].id); // Default to Eleven v3 (Alpha)
   
   // Project Context State
   const [projectId, setProjectId] = useState<string | null>(null);
