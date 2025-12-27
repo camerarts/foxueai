@@ -608,7 +608,7 @@ const ProjectWorkspace: React.FC = () => {
                                 <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2">{n.description}</p>
                                 {n.id !== 'input' && (
                                     <button onClick={(e) => { e.stopPropagation(); handleNodeAction(n.id); }} className={`mt-auto py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 ${generatingNodes.has(n.id) ? 'bg-slate-100 text-slate-400' : has ? 'bg-white border text-slate-600' : 'bg-slate-900 text-white'}`}>
-                                        {generatingNodes.has(n.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : has ? <RefreshCw className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />} {generatingNodes.has(n.id) ? '生成中' : has ? '重选' : '生成'}
+                                        {generatingNodes.has(n.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : has ? <RefreshCw className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />} {generatingNodes.has(n.id) ? '生成中' : has ? '重新生成' : '生成'}
                                     </button>
                                 )}
                              </div>
