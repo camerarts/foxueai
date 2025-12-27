@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 const VOICES = [
@@ -19,6 +19,7 @@ const VoiceStudio: React.FC = () => {
   const navigate = useNavigate();
   const [text, setText] = useState('');
   const [selectedVoice, setSelectedVoice] = useState(VOICES[0].id);
+  const [customVoiceId, setCustomVoiceId] = useState('');
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -45,13 +46,15 @@ const VoiceStudio: React.FC = () => {
     setAudioUrl(null);
     setErrorMsg(null);
 
+    const effectiveVoiceId = customVoiceId.trim() || selectedVoice;
+
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text.substring(0, 500), // Preview limit
-          voice_id: selectedVoice,
+          voice_id: effectiveVoiceId,
           stream: true
         })
       });
@@ -79,13 +82,15 @@ const VoiceStudio: React.FC = () => {
     setAudioUrl(null);
     setErrorMsg(null);
 
+    const effectiveVoiceId = customVoiceId.trim() || selectedVoice;
+
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text,
-          voice_id: selectedVoice,
+          voice_id: effectiveVoiceId,
           stream: false // Request cached file
         })
       });
@@ -123,22 +128,48 @@ const VoiceStudio: React.FC = () => {
               {VOICES.map(voice => (
                 <div 
                   key={voice.id}
-                  onClick={() => setSelectedVoice(voice.id)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedVoice === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
+                  onClick={() => {
+                      setSelectedVoice(voice.id);
+                      setCustomVoiceId(''); // Clear custom input
+                  }}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedVoice === voice.id && !customVoiceId ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedVoice === voice.id ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${selectedVoice === voice.id && !customVoiceId ? 'bg-violet-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
                       {voice.name[0]}
                     </div>
                     <div>
-                      <div className={`text-sm font-bold ${selectedVoice === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
+                      <div className={`text-sm font-bold ${selectedVoice === voice.id && !customVoiceId ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
                       <div className="text-[10px] text-slate-400">{voice.category}</div>
                     </div>
                   </div>
-                  {selectedVoice === voice.id && <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />}
+                  {selectedVoice === voice.id && !customVoiceId && <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />}
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-100">
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
+                <span>自定义 Voice ID</span>
+                {customVoiceId && <span className="text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded font-bold">优先使用</span>}
+             </label>
+             <div className="relative">
+                 <input 
+                    type="text"
+                    value={customVoiceId}
+                    onChange={(e) => {
+                        setCustomVoiceId(e.target.value);
+                        if (e.target.value) setSelectedVoice(''); // Visually deselect list
+                    }}
+                    placeholder="输入 ElevenLabs Voice ID..."
+                    className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white' : 'border-slate-200 focus:border-violet-300'}`}
+                 />
+                 <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
+             </div>
+             <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                如需使用克隆声音或其他库内声音，请在此粘贴 Voice ID，它将覆盖上方选择。
+             </p>
           </div>
           
           <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
