@@ -9,7 +9,8 @@ import {
   List, PanelRightClose, Sparkles, Loader2, Copy, 
   Check, Images, ArrowRight, Palette, Film, Maximize2, Play, Pause,
   ZoomIn, ZoomOut, Move, RefreshCw, Rocket, AlertCircle, Archive,
-  Cloud, CloudCheck, ArrowLeftRight, FileAudio, Upload, Trash2, Headphones, CheckCircle2, CloudUpload, Volume2, VolumeX, Wand2, Download, Music4, Clock, X, ClipboardPaste, Image as ImageIcon
+  Cloud, CloudCheck, ArrowLeftRight, FileAudio, Upload, Trash2, Headphones, CheckCircle2, CloudUpload, Volume2, VolumeX, Wand2, Download, Music4, Clock, X, ClipboardPaste, Image as ImageIcon,
+  Mic
 } from 'lucide-react';
 
 const formatTimestamp = (ts?: number) => {
@@ -239,7 +240,7 @@ const FancyAudioPlayer = ({ src, fileName, downloadName, isLocal, onReplace, onD
     );
 };
 
-const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnly, autoCleanAsterisks }: any) => {
+const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnly, autoCleanAsterisks, extraActions }: any) => {
   const clean = (t: string) => autoCleanAsterisks ? t.replace(/\*/g, '') : t;
   const [val, setVal] = useState(clean(content || ''));
   const [dirty, setDirty] = useState(false);
@@ -250,6 +251,7 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
       <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3"><h4 className="text-xs font-bold text-slate-500 uppercase">{title}</h4>{showStats && <span className="text-[10px] bg-white px-2 py-0.5 rounded border font-bold text-indigo-600 border-indigo-100">{stats(val)}</span>}</div>
         <div className="flex items-center gap-2">
+            {extraActions}
             {!readOnly && onSave && dirty && <button onClick={() => { onSave(val); setDirty(false); }} className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">保存 (8s)</button>}
             <RowCopyButton text={val} />
         </div>
@@ -623,7 +625,27 @@ const ProjectWorkspace: React.FC = () => {
             </div>
             <div className="flex-1 overflow-hidden bg-slate-50/50">
                  {selectedNodeId === 'input' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="视频主题" content={project.inputs.topic} readOnly={true} /></div>}
-                 {selectedNodeId === 'script' && <div className="p-6 h-full overflow-y-auto"><TextResultBox title="视频脚本" content={project.script} showStats={true} onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v })} autoCleanAsterisks={true} /></div>}
+                 
+                 {selectedNodeId === 'script' && <div className="p-6 h-full overflow-y-auto">
+                    <TextResultBox 
+                        title="视频脚本" 
+                        content={project.script} 
+                        showStats={true} 
+                        onSave={(v: any) => updateProjectAndSyncImmediately({ ...project, script: v })} 
+                        autoCleanAsterisks={true} 
+                        extraActions={
+                            <a 
+                                href="https://elevenlabs.io/app/speech-synthesis/text-to-speech" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:text-white hover:bg-slate-900 bg-white border border-slate-200 hover:border-slate-900 rounded-lg transition-all"
+                            >
+                                <Mic className="w-3 h-3" /> 去生成语音
+                            </a>
+                        }
+                    />
+                 </div>}
+
                  {selectedNodeId === 'audio_file' && (
                      <div className="flex flex-col h-full gap-4 p-6">
                         <div className="flex-[2] overflow-hidden">

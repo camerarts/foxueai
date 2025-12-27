@@ -202,6 +202,18 @@ const InspirationRepo: React.FC = () => {
     await storage.saveInspiration(updated);
     await handleAutoPush();
   };
+  
+  const handleTitleChange = (id: string, newTitle: string) => {
+      setInspirations(prev => prev.map(i => i.id === id ? { ...i, viralTitle: newTitle } : i));
+  };
+
+  const handleTitleBlur = async (id: string) => {
+      const item = inspirations.find(i => i.id === id);
+      if (item) {
+          await storage.saveInspiration(item);
+          await handleAutoPush();
+      }
+  };
 
   const handleApprove = async (item: Inspiration) => {
     // 采纳是关键流程操作，立即保存
@@ -371,7 +383,15 @@ const InspirationRepo: React.FC = () => {
                     <tr key={item.id} className={`group transition-colors ${item.marked ? 'bg-emerald-50 hover:bg-emerald-100/60' : 'hover:bg-amber-50/30'}`}>
                         <td className="py-3 px-4 text-center text-xs font-bold text-slate-400">{index + 1}</td>
                         <td className="py-3 px-4 text-center text-[10px] font-bold text-slate-800">{item.category}</td>
-                        <td className="py-3 px-4"><div className={`font-bold text-sm leading-snug line-clamp-2 ${item.marked ? 'text-emerald-800' : 'text-slate-800'}`}>{item.viralTitle}</div></td>
+                        <td className="py-3 px-4">
+                            <input 
+                                value={item.viralTitle} 
+                                onChange={(e) => handleTitleChange(item.id, e.target.value)}
+                                onBlur={() => handleTitleBlur(item.id)}
+                                className={`w-full bg-transparent border border-transparent focus:border-amber-300 focus:bg-white focus:ring-2 focus:ring-amber-100 rounded-lg px-2 py-1.5 text-sm font-bold transition-all outline-none ${item.marked ? 'text-emerald-800' : 'text-slate-800'}`}
+                                placeholder="输入标题..."
+                            />
+                        </td>
                         <td className="py-3 px-4 text-center">{item.rating && <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-md border border-orange-100"><Star className="w-3 h-3 fill-orange-500" /> {item.rating}</span>}</td>
                         <td className="py-3 px-4 text-right pr-6">
                             <div className="flex items-center justify-center gap-3">
