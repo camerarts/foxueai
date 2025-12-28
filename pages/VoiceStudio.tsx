@@ -759,7 +759,7 @@ const VoiceStudio: React.FC = () => {
                             className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-violet-500/20"
                           >
                               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 
-                              语音生成 + 自动合并
+                              语音合成
                           </button>
                       )}
                       {isSplitMode && step === 3 && (
@@ -813,9 +813,19 @@ const VoiceStudio: React.FC = () => {
                                     {projectTitle ? `项目文案: ${projectTitle}` : '文本输入'}
                                 </span>
                             </div>
-                            <span className="text-xs font-mono text-slate-400">
-                                {text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字
-                            </span>
+                            <div className="flex items-center gap-4">
+                                <span className="text-xs font-mono text-slate-400">
+                                    {text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字
+                                </span>
+                                <button 
+                                    onClick={handleGenerateSingle}
+                                    disabled={loading || streaming || !text}
+                                    className="px-4 py-1.5 bg-slate-900 hover:bg-violet-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
+                                    语音合成
+                                </button>
+                            </div>
                         </div>
                         <textarea 
                           value={text}
@@ -866,15 +876,6 @@ const VoiceStudio: React.FC = () => {
                             >
                                {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                                试听片段
-                            </button>
-                            
-                            <button 
-                              onClick={handleGenerateSingle}
-                              disabled={loading || streaming || !text}
-                              className="px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-slate-900 hover:bg-violet-600 transition-all shadow-lg hover:shadow-violet-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings2 className="w-4 h-4" />}
-                               生成并自动保存
                             </button>
                         </>
                     ) : (
