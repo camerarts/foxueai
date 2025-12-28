@@ -304,32 +304,36 @@ const VoiceStudio: React.FC = () => {
   const handleMerge = async () => {
       if (!audioUrl1 || !audioUrl2) return;
       setLoading(true);
-      addLog("开始合并音频...");
+      addLog("请求云端极速合并...");
 
       try {
-          // Fetch both blobs
-          const [blob1, blob2] = await Promise.all([
-              fetch(audioUrl1).then(r => r.blob()),
-              fetch(audioUrl2).then(r => r.blob())
-          ]);
+          // New optimized flow: Server-side merge
+          // Send the two existing R2 URLs (paths) to the server
+          const response = await fetch('/api/audio/merge', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                  url1: audioUrl1, 
+                  url2: audioUrl2, 
+                  projectId: projectId 
+              })
+          });
 
-          // Concatenate Blobs (MP3 allows simple concatenation)
-          const mergedBlob = new Blob([blob1, blob2], { type: 'audio/mpeg' });
+          if (!response.ok) {
+              const err = await response.json();
+              throw new Error(err.error || 'Merge failed');
+          }
+
+          const data = await response.json();
+          setFinalAudioUrl(data.url);
           
-          // Upload merged file to R2 to get a permanent URL
-          // We use the storage service logic manually here to upload a Blob
-          const fileNameSafe = (projectTitle || `merged_${Date.now()}`).replace(/[\\/:*?"<>|]/g, "_");
-          const file = new File([mergedBlob], `${fileNameSafe}.mp3`, { type: 'audio/mpeg' });
-          const uploadedUrl = await storage.uploadFile(file, projectId || 'temp_voice_studio');
+          if (audioRef.current) audioRef.current.src = data.url;
           
-          setFinalAudioUrl(uploadedUrl);
-          if (audioRef.current) audioRef.current.src = uploadedUrl;
-          
-          addLog("合并并上传成功！");
+          addLog("云端合并成功！");
           
           // If in project context, auto save
           if (projectId) {
-              await handleSaveToProject(uploadedUrl);
+              await handleSaveToProject(data.url);
           }
 
       } catch (e: any) {
@@ -547,7 +551,7 @@ const VoiceStudio: React.FC = () => {
                             className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-fuchsia-500/20"
                           >
                               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />} 
-                              合并语音 & 上传
+                              极速合并 & 上传
                           </button>
                       )}
                   </div>

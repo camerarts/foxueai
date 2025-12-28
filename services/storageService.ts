@@ -1,3 +1,4 @@
+
 import { ProjectData, PromptTemplate, DEFAULT_PROMPTS, ProjectStatus, Inspiration } from '../types';
 
 // API Endpoints
@@ -116,6 +117,22 @@ export const getLastUploadTime = (): string => {
 
 // --- Upload Methods ---
 
+// Helper to safe fetch
+const safeFetch = async (url: string, options?: RequestInit) => {
+    try {
+        const res = await fetch(url, options);
+        if (res.status === 404) {
+            console.warn(`Sync endpoint ${url} not found (Offline/Local mode).`);
+            return null;
+        }
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res;
+    } catch (e) {
+        console.warn("Network request failed", e);
+        throw e;
+    }
+};
+
 export const uploadProjects = async (): Promise<void> => {
   const projects = await dbGetAll<ProjectData>(STORE_PROJECTS);
   const sanitizedProjects = projects.map(p => {
@@ -132,51 +149,59 @@ export const uploadProjects = async (): Promise<void> => {
     return copy;
   });
 
-  const res = await fetch(`${API_BASE}/sync`, {
+  const res = await safeFetch(`${API_BASE}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ projects: sanitizedProjects })
   });
-  if (!res.ok) throw new Error("Projects upload failed");
-  updateUploadTimestamp('projects');
+  if (res) updateUploadTimestamp('projects');
 };
 
 export const uploadInspirations = async (): Promise<void> => {
   const inspirations = await dbGetAll<Inspiration>(STORE_INSPIRATIONS);
-  const res = await fetch(`${API_BASE}/sync`, {
+  const res = await safeFetch(`${API_BASE}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ inspirations })
   });
-  if (!res.ok) throw new Error("Inspirations upload failed");
-  updateUploadTimestamp('inspirations');
+  if (res) updateUploadTimestamp('inspirations');
 };
 
 export const uploadPrompts = async (): Promise<void> => {
   const promptsStr = localStorage.getItem(KEY_PROMPTS);
   const prompts = promptsStr ? JSON.parse(promptsStr) : DEFAULT_PROMPTS;
-  const res = await fetch(`${API_BASE}/sync`, {
+  const res = await safeFetch(`${API_BASE}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompts })
   });
-  if (!res.ok) throw new Error("Prompts upload failed");
-  updateUploadTimestamp('prompts');
+  if (res) updateUploadTimestamp('prompts');
 };
 
 export const uploadTools = async (): Promise<void> => {
   const tools = await dbGetAll<{id: string, data: any}>(STORE_TOOLS);
-  const res = await fetch(`${API_BASE}/sync`, {
+  const res = await safeFetch(`${API_BASE}/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tools })
   });
-  if (!res.ok) throw new Error("Tools upload failed");
-  updateUploadTimestamp('tools');
+  if (res) updateUploadTimestamp('tools');
 };
 
 export const downloadAllData = async (): Promise<void> => {
-  const res = await fetch(`${API_BASE}/sync`);
+  let res: Response | null = null;
+  try {
+      res = await fetch(`${API_BASE}/sync`);
+  } catch(e) {
+      console.warn("Download sync failed (Network error)", e);
+      return; // Offline mode
+  }
+  
+  if (res.status === 404) {
+      console.warn("Sync API not found. Skipping download.");
+      return;
+  }
+  
   if (!res.ok) throw new Error("Download failed");
   const data = await res.json();
 
@@ -312,12 +337,12 @@ export const saveToolData = async (id: string, data: any): Promise<void> => {
 };
 
 export const uploadToolData = async (id: string, data: any): Promise<void> => {
-    const res = await fetch(`${API_BASE}/sync`, {
+    const res = await safeFetch(`${API_BASE}/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tools: [{ id, data }] })
     });
-    if (res.ok) updateUploadTimestamp('tools');
+    if (res) updateUploadTimestamp('tools');
 };
 
 export const fetchRemoteToolData = async <T>(id: string): Promise<T | null> => {

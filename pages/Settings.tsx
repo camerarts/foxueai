@@ -41,8 +41,9 @@ const Settings: React.FC = () => {
                 await storage.downloadAllData();
                 setSyncStatus('synced');
             } catch (e) {
-                console.error("Failed to download initial prompts", e);
-                setSyncStatus('error');
+                console.warn("Initial sync check failed (Offline or Local mode)", e);
+                // Don't show error state for initial load failure (common in offline/dev envs)
+                setSyncStatus('idle');
             }
         }
         const data = await storage.getPrompts();
@@ -68,6 +69,7 @@ const Settings: React.FC = () => {
             setRefreshTime(`保存完成：${new Date().toLocaleTimeString()}`);
         } catch (e) {
             console.error("Auto-sync prompts failed", e);
+            // If API is missing (404 was handled in storageService but throw happened), show error or handle gracefully
             setSyncStatus('error');
         }
     };
