@@ -359,7 +359,7 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Single Generate (Robust Version with Client Upload) ---
+  // --- Single Generate (Persistent Mode) ---
   const handleGenerateSingle = async () => {
       if (!text) {
           alert("请输入文本内容");
@@ -371,74 +371,35 @@ const VoiceStudio: React.FC = () => {
       setIsSavedToProject(false);
       setFinalAudioUrl(null); 
 
-      addLog("🚀 开始生成任务 (Stream Mode)...");
+      addLog("🚀 开始生成任务...");
 
       try {
-          addLog("--> 正在请求音频流 (Download)...");
-          // 1. Force Stream Mode: This downloads the audio to the browser directly
-          const blobUrl = await callTtsApi(text, true); 
+          addLog("--> 正在请求云端生成...");
           
-          if (!blobUrl) throw new Error("API 返回了空数据");
+          // Use stream: false to utilize server-side generation & storage
+          // This matches the split project behavior (minus merge)
+          const cloudUrl = await callTtsApi(text, false); 
+          
+          if (!cloudUrl) throw new Error("API 返回了空数据");
 
-          addLog("--> ✅ 音频流接收成功，准备播放");
+          addLog("--> ✅ 生成并上传成功");
 
-          // 2. Critical Path: Update UI IMMEDIATELY
-          setFinalAudioUrl(blobUrl);
+          // Update UI
+          setFinalAudioUrl(cloudUrl);
           setLoading(false); 
           
-          // Play Audio Safely
-          setTimeout(() => {
-              if (audioRef.current) {
-                  audioRef.current.src = blobUrl;
-                  audioRef.current.play().catch(console.warn);
-              }
-          }, 200);
+          if (audioRef.current) {
+              audioRef.current.src = cloudUrl;
+              audioRef.current.play().catch(console.warn);
+          }
           
-          // 3. Background Pipeline: Convert Blob -> Upload -> Save Project
-          (async () => {
-              try {
-                  await recordUsage(text.length);
-                  
-                  if (!projectId) {
-                      addLog("--> ℹ️ 临时任务，未关联项目，仅试听");
-                      return;
-                  }
-
-                  addLog("--> 🔄 正在后台上传至云端...");
-                  
-                  // Convert Blob URL back to Blob/File for upload
-                  const blob = await fetch(blobUrl).then(r => r.blob());
-                  const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
-                  
-                  // Client-side Upload to R2
-                  const cloudUrl = await storage.uploadFile(file, projectId);
-                  addLog(`--> ✅ 上传成功!`);
-                  
-                  // Update Project Data
-                  const project = await storage.getProject(projectId);
-                  if (project) {
-                      const updated = { 
-                          ...project, 
-                          audioFile: cloudUrl,
-                          moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
-                      };
-                      await storage.saveProject(updated);
-                      await storage.uploadProjects(); // Sync to D1
-                      
-                      setIsSavedToProject(true);
-                      addLog("--> 💾 项目音频文件已更新");
-                      
-                      // Upgrade local blob URL to cloud URL silently
-                      setFinalAudioUrl(cloudUrl);
-                  } else {
-                      addLog("⚠️ 项目未找到，无法关联文件");
-                  }
-
-              } catch (bgErr: any) {
-                  console.error("Background pipeline failed", bgErr);
-                  addLog(`⚠️ 后台上传失败，请点击“保存到项目”手动重试`);
-              }
-          })();
+          // Auto Save Logic
+          await recordUsage(text.length);
+          if (projectId) {
+              await handleSaveToProject(cloudUrl);
+          } else {
+              addLog("--> ℹ️ 临时任务，未关联项目");
+          }
 
       } catch (e: any) {
           setLoading(false);
@@ -483,18 +444,6 @@ const VoiceStudio: React.FC = () => {
       
       setSavingToProject(true);
       try {
-          // If the audio is currently a local blob, we MUST upload it first
-          if (targetUrl.startsWith('blob:')) {
-              addLog("🔄 检测到本地临时音频，正在上传...");
-              const blob = await fetch(targetUrl).then(r => r.blob());
-              const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
-              
-              const cloudUrl = await storage.uploadFile(file, projectId);
-              addLog("✅ 上传成功！");
-              targetUrl = cloudUrl; // Use new cloud URL
-              setFinalAudioUrl(cloudUrl); // Update UI
-          }
-
           const project = await storage.getProject(projectId);
           if (project) {
                const updated = { 

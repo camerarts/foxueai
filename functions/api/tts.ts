@@ -36,7 +36,7 @@ export const onRequestPost = async (context: any) => {
         }
     }
 
-    // 3. Standard Generation (Client handles splitting now)
+    // 3. Standard Generation
     const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voice_id}${stream ? '/stream' : ''}`;
     
     const response = await fetch(elevenLabsUrl, {
@@ -67,13 +67,15 @@ export const onRequestPost = async (context: any) => {
         headers: { 'Content-Type': 'audio/mpeg' }
       });
     } else {
-      // Save to R2
-      const audioBuffer = await response.arrayBuffer();
+      // Save to R2 using STREAMING to avoid memory limits
       if (env.BUCKET) {
-        await env.BUCKET.put(filename, audioBuffer, {
+        // Clone the response because we might need body for R2 AND response logic (though here we just put)
+        // Actually R2 put consumes the stream.
+        await env.BUCKET.put(filename, response.body, {
             httpMetadata: { contentType: 'audio/mpeg' }
         });
       }
+      
       return Response.json({ 
         cached: false, 
         url: `/api/images/${encodeURIComponent(filename)}` 
