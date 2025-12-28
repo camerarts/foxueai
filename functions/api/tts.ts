@@ -62,16 +62,17 @@ export const onRequestPost = async (context: any) => {
     }
 
     if (stream) {
-      // Pass-through stream
+      // Pass-through stream to client
       return new Response(response.body, {
         headers: { 'Content-Type': 'audio/mpeg' }
       });
     } else {
-      // Save to R2 using STREAMING to avoid memory limits
+      // FIX: Read stream into ArrayBuffer first. 
+      // R2.put() throws "readable stream must have a known length" if passed a chunked stream directly without Content-Length.
+      const audioBuffer = await response.arrayBuffer();
+
       if (env.BUCKET) {
-        // Clone the response because we might need body for R2 AND response logic (though here we just put)
-        // Actually R2 put consumes the stream.
-        await env.BUCKET.put(filename, response.body, {
+        await env.BUCKET.put(filename, audioBuffer, {
             httpMetadata: { contentType: 'audio/mpeg' }
         });
       }
