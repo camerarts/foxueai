@@ -63,12 +63,21 @@ const VoiceStudio: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [consoleLogs, setConsoleLogs] = useState<string[]>(['>> 系统就绪，等待任务...']);
 
   const addLog = (msg: string) => {
-      setConsoleLogs(prev => [...prev.slice(-10), `>> ${msg}`]);
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+      setConsoleLogs(prev => [...prev.slice(-19), `[${time}] ${msg}`]);
   };
+
+  // Auto-scroll logs
+  useEffect(() => {
+      if (logsContainerRef.current) {
+          logsContainerRef.current.scrollTop = logsContainerRef.current.scrollHeight;
+      }
+  }, [consoleLogs]);
 
   // Restore User Preference & Load Data
   useEffect(() => {
@@ -144,7 +153,6 @@ const VoiceStudio: React.FC = () => {
       
       const payload = { logs: updatedLogs };
       await storage.saveToolData(STORAGE_KEY_STATS, payload);
-      // Optional: upload immediately or let background sync handle it
       storage.uploadToolData(STORAGE_KEY_STATS, payload).catch(console.error);
   };
 
@@ -244,17 +252,17 @@ const VoiceStudio: React.FC = () => {
   const handlePreview = async () => {
     if (!text.trim()) return;
     setStreaming(true);
-    addLog("开始试听片段生成...");
+    addLog("开始试听片段生成 (Stream)...");
     try {
         const url = await callTtsApi(text.substring(0, 300), true);
         if (audioRef.current) {
             audioRef.current.src = url;
             audioRef.current.play();
         }
-        addLog("试听片段播放中");
+        addLog("✅ 试听片段播放中");
     } catch (e: any) {
         setErrorMsg(e.message);
-        addLog(`错误: ${e.message}`);
+        addLog(`❌ 错误: ${e.message}`);
     } finally {
         setStreaming(false);
     }
@@ -291,53 +299,50 @@ const VoiceStudio: React.FC = () => {
       setFinalAudioUrl(null);
       setIsSavedToProject(false);
       
-      addLog("开始并行生成两段语音...");
+      addLog("🚀 开始并行生成两段语音...");
 
       try {
           const [res1, res2] = await Promise.all([
-              callTtsApi(textPart1, false),
+              callTtsApi(textPart1, false), // Dual mode uses standard generation (server cache)
               callTtsApi(textPart2, false)
           ]);
 
           setAudioUrl1(res1);
           setAudioUrl2(res2);
           
-          // Record Usage
-          await recordUsage(textPart1.length + textPart2.length);
+          recordUsage(textPart1.length + textPart2.length).catch(console.error);
 
-          addLog("两段语音生成完毕，正在请求自动合并...");
+          addLog("✅ 生成完毕，正在请求合并...");
           setStep(3); 
 
           const mergedUrl = await performMerge(res1, res2);
           
-          // Priority 1: Update UI State
           setFinalAudioUrl(mergedUrl);
           
           if (audioRef.current) audioRef.current.src = mergedUrl;
-          addLog("合并成功！");
+          addLog("✅ 合并成功！");
 
-          // Priority 2: Auto Save (Isolated Try-Catch)
           if (projectId) {
-              addLog("正在自动保存至项目...");
+              addLog("💾 正在保存合并文件...");
               try {
                   await handleSaveToProject(mergedUrl);
               } catch (saveErr: any) {
                   console.error("Auto save failed", saveErr);
                   addLog(`⚠️ 自动保存失败: ${saveErr.message}`);
-                  // Do not throw, keep UI showing the generated audio
               }
+          } else {
+              addLog("ℹ️ 未关联项目，跳过保存");
           }
 
       } catch (e: any) {
           setErrorMsg(e.message);
-          addLog(`流程失败: ${e.message}`);
+          addLog(`❌ 流程失败: ${e.message}`);
       } finally {
           setLoading(false);
       }
   };
 
-  // --- Single Generate (And Auto Save) ---
-  // Fix: Decoupled UI update from saving logic to ensure audio shows up immediately
+  // --- Single Generate (Robust Version with Client Upload) ---
   const handleGenerateSingle = async () => {
       if (!text) {
           alert("请输入文本内容");
@@ -349,41 +354,73 @@ const VoiceStudio: React.FC = () => {
       setIsSavedToProject(false);
       setFinalAudioUrl(null); 
 
+      addLog("🚀 开始生成任务 (Stream Mode)...");
+
       try {
-          addLog("正在请求 API 生成语音...");
-          // 1. Critical Path: Get Audio URL
-          const url = await callTtsApi(text, false);
+          addLog("--> 正在请求音频流...");
+          // 1. Force Stream Mode for robustness on long text (avoids 504 timeouts on server)
+          const blobUrl = await callTtsApi(text, true); 
           
-          if (!url) throw new Error("API 返回了空链接");
+          if (!blobUrl) throw new Error("API 返回了空数据");
+
+          addLog("--> ✅ 音频流接收成功");
 
           // 2. Critical Path: Update UI IMMEDIATELY
-          setFinalAudioUrl(url);
-          setLoading(false); // Stop loading indicator so user sees the player
-          addLog("语音生成成功，准备播放...");
+          setFinalAudioUrl(blobUrl);
+          setLoading(false); 
           
           // Play Audio Safely
           setTimeout(() => {
               if (audioRef.current) {
-                  audioRef.current.src = url;
+                  audioRef.current.src = blobUrl;
                   audioRef.current.play().catch(console.warn);
               }
-          }, 100);
+          }, 200);
           
-          // 3. Side Effects: Stats (Non-blocking)
-          recordUsage(text.length).catch(err => console.error("Stats error", err));
-
-          // 4. Side Effects: Auto Save to Project (Non-blocking)
-          if (projectId) {
-              addLog("正在自动保存至项目...");
+          // 3. Background Pipeline: Stats -> Convert Blob -> Upload -> Save Project
+          (async () => {
               try {
-                  await handleSaveToProject(url);
-              } catch (saveError: any) {
-                  console.error("Auto-save failed", saveError);
-                  addLog(`⚠️ 自动保存失败: ${saveError.message}`);
+                  await recordUsage(text.length);
+                  
+                  if (!projectId) {
+                      addLog("--> ℹ️ 临时任务，仅提供试听");
+                      return;
+                  }
+
+                  addLog("--> 🔄 正在后台转码并上传...");
+                  
+                  // Convert Blob URL to File
+                  const blob = await fetch(blobUrl).then(r => r.blob());
+                  const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+                  
+                  // Client-side Upload to R2 (bypassing server timeout limits)
+                  const cloudUrl = await storage.uploadFile(file, projectId);
+                  addLog(`--> ✅ 上传成功!`);
+                  
+                  // Update Project Data
+                  const project = await storage.getProject(projectId);
+                  if (project) {
+                      const updated = { 
+                          ...project, 
+                          audioFile: cloudUrl,
+                          moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
+                      };
+                      await storage.saveProject(updated);
+                      await storage.uploadProjects(); // Sync D1
+                      
+                      setIsSavedToProject(true);
+                      addLog("--> 💾 项目音频文件已更新至云端");
+                  } else {
+                      addLog("⚠️ 项目未找到，无法关联文件");
+                  }
+
+              } catch (bgErr: any) {
+                  console.error("Background pipeline failed", bgErr);
+                  addLog(`⚠️ 后台处理失败: ${bgErr.message}`);
               }
-          }
+          })();
+
       } catch (e: any) {
-          // Only stop loading here if it wasn't stopped above
           setLoading(false);
           setErrorMsg(e.message);
           addLog(`❌ 生成失败: ${e.message}`);
@@ -395,13 +432,13 @@ const VoiceStudio: React.FC = () => {
       if (!audioUrl1 || !audioUrl2) return;
       setLoading(true);
       setIsSavedToProject(false);
-      addLog("手动请求合并...");
+      addLog("🔧 手动请求合并...");
 
       try {
           const mergedUrl = await performMerge(audioUrl1, audioUrl2);
           setFinalAudioUrl(mergedUrl);
           if (audioRef.current) audioRef.current.src = mergedUrl;
-          addLog("合并成功！");
+          addLog("✅ 合并成功！");
           
           if (projectId) {
               try {
@@ -412,7 +449,7 @@ const VoiceStudio: React.FC = () => {
           }
       } catch (e: any) {
           setErrorMsg(e.message);
-          addLog(`合并失败: ${e.message}`);
+          addLog(`❌ 合并失败: ${e.message}`);
       } finally {
           setLoading(false);
       }
@@ -421,16 +458,12 @@ const VoiceStudio: React.FC = () => {
   const handleSaveToProject = async (urlOverride?: string) => {
       const targetUrl = urlOverride || finalAudioUrl;
       
-      if (!projectId) {
-          console.warn("Cannot save: No Project ID");
-          return;
-      }
-      if (!targetUrl) {
-          console.warn("Cannot save: No Audio URL");
-          return;
-      }
+      if (!projectId) { console.warn("No Project ID"); return; }
+      if (!targetUrl) { console.warn("No Audio URL"); return; }
+      
+      // Prevent saving local blob URLs directly (unless handled by upstream logic like handleGenerateSingle)
       if (targetUrl.startsWith('blob:')) {
-          alert("请先生成完整音频（非试听）以获取可保存的文件。");
+          alert("当前是预览音频，请等待后台上传完成或重新生成。");
           return;
       }
 
@@ -444,18 +477,12 @@ const VoiceStudio: React.FC = () => {
                    moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
                };
                await storage.saveProject(updated);
-               
-               // Non-blocking upload
                storage.uploadProjects().catch(console.error);
-               
-               addLog(`✅ 已成功保存到项目 "${project.title}" 的音频文件中！`);
+               addLog(`✅ 项目音频已手动更新`);
                setIsSavedToProject(true);
-          } else {
-              throw new Error("项目不存在或已删除");
           }
       } catch(e: any) {
-          // Let the caller handle error display if needed, but here we just throw
-          throw e;
+          addLog(`保存失败: ${e.message}`);
       } finally {
           setSavingToProject(false);
       }
@@ -475,8 +502,6 @@ const VoiceStudio: React.FC = () => {
       const now = new Date();
       const labels = [];
       const data = [];
-      
-      // Initialize map for last N days
       const dateMap = new Map<string, number>();
       for (let i = chartPeriod - 1; i >= 0; i--) {
           const d = new Date(now);
@@ -485,8 +510,6 @@ const VoiceStudio: React.FC = () => {
           dateMap.set(key, 0);
           labels.push(key);
       }
-
-      // Aggregate usage
       usageLogs.forEach(log => {
           const d = new Date(log.timestamp);
           const key = `${d.getMonth() + 1}/${d.getDate()}`;
@@ -494,12 +517,8 @@ const VoiceStudio: React.FC = () => {
               dateMap.set(key, (dateMap.get(key) || 0) + log.charCount);
           }
       });
-
-      // Build data array ensuring order
       labels.forEach(key => data.push(dateMap.get(key) || 0));
-      
-      const maxVal = Math.max(...data, 1); // Prevent division by zero
-      
+      const maxVal = Math.max(...data, 1);
       return { labels, data, maxVal };
   }, [usageLogs, chartPeriod]);
 
@@ -636,7 +655,7 @@ const VoiceStudio: React.FC = () => {
                  {chartData.data.map((val, i) => (
                      <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
                          {/* Bar Label (Always Visible) */}
-                         <span className="text-[9px] text-slate-400 font-mono mb-0.5">{val > 0 ? val : ''}</span>
+                         <span className="text-[9px] text-slate-400 font-mono mb-0.5 opacity-100">{val > 0 ? val : ''}</span>
                          {/* Bar */}
                          <div 
                             className="w-full bg-violet-200 hover:bg-violet-400 rounded-t-sm transition-all relative group-hover:shadow-md"
@@ -654,14 +673,14 @@ const VoiceStudio: React.FC = () => {
           </div>
           
           {/* Console */}
-          <div className="flex-1 flex flex-col justify-end min-h-[120px]">
-             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Activity className="w-3.5 h-3.5" /> 生成进度</label>
+          <div className="flex-1 flex flex-col justify-end min-h-[140px]">
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Activity className="w-3.5 h-3.5" /> 生成进度日志</label>
              <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
-                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-24">
+                <div ref={logsContainerRef} className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-28 scroll-smooth">
                     {consoleLogs.map((log, i) => (
-                        <div key={i} className="text-slate-300">{log}</div>
+                        <div key={i} className={`break-all ${log.includes('❌') ? 'text-rose-400 font-bold' : log.includes('✅') ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{log}</div>
                     ))}
-                    {errorMsg && <div className="text-rose-500 font-bold">&gt;&gt; 错误: {errorMsg}</div>}
+                    {errorMsg && <div className="text-rose-500 font-bold border-l-2 border-rose-500 pl-2">错误: {errorMsg}</div>}
                 </div>
              </div>
           </div>
@@ -804,7 +823,7 @@ const VoiceStudio: React.FC = () => {
                                 }`}
                             >
                                 {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-                                {isSavedToProject ? '已上传项目文件' : '保存到项目'}
+                                {isSavedToProject ? '已上传项目文件' : '手动保存到项目'}
                             </button>
                          </>
                       )}
