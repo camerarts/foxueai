@@ -1,18 +1,11 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar } from 'lucide-react';
 import * as storage from '../services/storageService';
 
-const PRESET_VOICES = [
-  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', category: 'American, Calm', gender: 'Female' },
-  { id: 'AZnzlk1XvdvUeBnXmlld', name: 'Domi', category: 'American, Emotive', gender: 'Female' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella', category: 'American, Soft', gender: 'Female' },
-  { id: 'ErXwobaYiN019PkySvjV', name: 'Antoni', category: 'American, Well-rounded', gender: 'Male' },
-  { id: 'TxGEqnHWrfWFTfGW9XjX', name: 'Josh', category: 'American, Deep', gender: 'Male' },
-  { id: 'ODq5zmih8GrVes37Dizj', name: 'Patrick', category: 'American, Shouty', gender: 'Male' },
-  { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam', category: 'American, Deep', gender: 'Male' },
-];
+// Default fallback voice if no custom ID is provided (Rachel)
+const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
 
 const TTS_MODELS = [
   { id: 'eleven_v3', name: 'Eleven v3' },
@@ -24,7 +17,13 @@ interface CustomVoice {
     createdAt: number;
 }
 
+interface UsageLog {
+    timestamp: number;
+    charCount: number;
+}
+
 const STORAGE_KEY_VOICES = 'custom_voices';
+const STORAGE_KEY_STATS = 'voice_usage_stats';
 
 const VoiceStudio: React.FC = () => {
   const location = useLocation();
@@ -45,11 +44,14 @@ const VoiceStudio: React.FC = () => {
   const [finalAudioUrl, setFinalAudioUrl] = useState<string | null>(null);
 
   // Voice State
-  const [selectedPresetId, setSelectedPresetId] = useState(PRESET_VOICES[0].id);
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
   const [modelId, setModelId] = useState(TTS_MODELS[0].id);
+  
+  // Statistics State
+  const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
+  const [chartPeriod, setChartPeriod] = useState<number>(7); // Days
   
   // Project Context
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -67,7 +69,7 @@ const VoiceStudio: React.FC = () => {
       setConsoleLogs(prev => [...prev.slice(-10), `>> ${msg}`]);
   };
 
-  // Restore User Preference
+  // Restore User Preference & Load Data
   useEffect(() => {
     const pref = localStorage.getItem('lva_voice_pref');
     if (pref) {
@@ -76,16 +78,12 @@ const VoiceStudio: React.FC = () => {
             if (type === 'custom') {
                 setCustomVoiceId(id);
                 setCustomVoiceName(name || '');
-                setSelectedPresetId('');
-            } else if (type === 'preset') {
-                setSelectedPresetId(id);
-                setCustomVoiceId('');
-                setCustomVoiceName('');
             }
         } catch (e) {
             console.error("Failed to parse voice preference", e);
         }
     }
+    loadData();
   }, []);
 
   useEffect(() => {
@@ -98,7 +96,6 @@ const VoiceStudio: React.FC = () => {
     if (location.state?.projectTitle) {
         setProjectTitle(location.state.projectTitle);
     }
-    loadSavedVoices();
   }, [location]);
 
   // Check text length on change to suggest splitting
@@ -108,11 +105,12 @@ const VoiceStudio: React.FC = () => {
       }
   }, [text]);
 
-  const loadSavedVoices = async () => {
+  const loadData = async () => {
       try {
-          const data = await storage.getToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
-          if (data && Array.isArray(data.voices)) {
-              setSavedVoices(data.voices);
+          // Load Voices
+          const voiceData = await storage.getToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
+          if (voiceData && Array.isArray(voiceData.voices)) {
+              setSavedVoices(voiceData.voices);
           } else {
               const remote = await storage.fetchRemoteToolData<{ voices: CustomVoice[] }>(STORAGE_KEY_VOICES);
               if (remote && Array.isArray(remote.voices)) {
@@ -120,8 +118,14 @@ const VoiceStudio: React.FC = () => {
                   await storage.saveToolData(STORAGE_KEY_VOICES, remote);
               }
           }
+
+          // Load Stats
+          const statsData = await storage.getToolData<{ logs: UsageLog[] }>(STORAGE_KEY_STATS);
+          if (statsData && Array.isArray(statsData.logs)) {
+              setUsageLogs(statsData.logs);
+          }
       } catch (e) {
-          console.error("Failed to load custom voices", e);
+          console.error("Failed to load data", e);
       }
   };
 
@@ -132,7 +136,18 @@ const VoiceStudio: React.FC = () => {
       storage.uploadToolData(STORAGE_KEY_VOICES, payload).catch(console.error);
   };
 
-  const saveUserPref = (type: 'custom' | 'preset', id: string, name?: string) => {
+  const recordUsage = async (charCount: number) => {
+      const newLog: UsageLog = { timestamp: Date.now(), charCount };
+      const updatedLogs = [...usageLogs, newLog];
+      setUsageLogs(updatedLogs);
+      
+      const payload = { logs: updatedLogs };
+      await storage.saveToolData(STORAGE_KEY_STATS, payload);
+      // Optional: upload immediately or let background sync handle it
+      storage.uploadToolData(STORAGE_KEY_STATS, payload).catch(console.error);
+  };
+
+  const saveUserPref = (type: 'custom', id: string, name?: string) => {
       localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name }));
   };
 
@@ -158,30 +173,19 @@ const VoiceStudio: React.FC = () => {
       if (customVoiceId === id) {
           setCustomVoiceName('');
           setCustomVoiceId('');
-          setSelectedPresetId(PRESET_VOICES[0].id);
-          saveUserPref('preset', PRESET_VOICES[0].id);
       }
   };
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       setCustomVoiceId(voice.id);
       setCustomVoiceName(voice.name);
-      setSelectedPresetId('');
       saveUserPref('custom', voice.id, voice.name);
-  };
-
-  const handleSelectPreset = (id: string) => {
-      setSelectedPresetId(id);
-      setCustomVoiceId('');
-      setCustomVoiceName('');
-      saveUserPref('preset', id);
   };
 
   const handleCustomIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
       setCustomVoiceId(val);
       if (val) {
-          setSelectedPresetId('');
           saveUserPref('custom', val, customVoiceName);
       }
   };
@@ -189,33 +193,26 @@ const VoiceStudio: React.FC = () => {
   // --- Step 1: Split Text ---
   const handleSplitText = () => {
       if (!text) return;
-      
-      // Enforce 1700 char limit rule for splitting
       if (text.length <= 1700) {
           alert("文本未超过 1700 字符，无需使用拆分功能，直接生成即可。");
           return;
       }
-      
       const limit = Math.ceil(text.length / 2);
-      
-      // Smart split logic: find closest sentence ending near middle
       let splitIdx = text.lastIndexOf('。', limit + 100);
       if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('.', limit + 100);
       if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('\n', limit + 100);
-      
-      if (splitIdx === -1) splitIdx = limit; // Hard split if no punctuation
-      else splitIdx += 1; // Include punctuation
+      if (splitIdx === -1) splitIdx = limit;
+      else splitIdx += 1;
 
       setTextPart1(text.substring(0, splitIdx));
       setTextPart2(text.substring(splitIdx));
-      
       setIsSplitMode(true);
       setStep(2);
       addLog(`文本已拆分为两部分 (P1: ${splitIdx}, P2: ${text.length - splitIdx})`);
   };
 
   const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
-      const effectiveVoiceId = customVoiceId.trim() || selectedPresetId;
+      const effectiveVoiceId = customVoiceId.trim() || DEFAULT_VOICE_ID;
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,7 +291,6 @@ const VoiceStudio: React.FC = () => {
       addLog("开始并行生成两段语音...");
 
       try {
-          // 1. Parallel Generation
           const [res1, res2] = await Promise.all([
               callTtsApi(textPart1, false),
               callTtsApi(textPart2, false)
@@ -302,18 +298,19 @@ const VoiceStudio: React.FC = () => {
 
           setAudioUrl1(res1);
           setAudioUrl2(res2);
-          addLog("两段语音生成完毕，正在请求自动合并...");
           
-          setStep(3); // Visual cue
+          // Record Usage
+          await recordUsage(textPart1.length + textPart2.length);
 
-          // 2. Auto Merge
+          addLog("两段语音生成完毕，正在请求自动合并...");
+          setStep(3); 
+
           const mergedUrl = await performMerge(res1, res2);
           setFinalAudioUrl(mergedUrl);
           
           if (audioRef.current) audioRef.current.src = mergedUrl;
           addLog("合并成功！");
 
-          // 3. Auto Save to Project
           if (projectId) {
               addLog("正在自动保存至项目...");
               await handleSaveToProject(mergedUrl);
@@ -333,11 +330,14 @@ const VoiceStudio: React.FC = () => {
       setErrorMsg(null);
       try {
           const url = await callTtsApi(text, false);
+          
+          // Record Usage
+          await recordUsage(text.length);
+
           setFinalAudioUrl(url);
           if (audioRef.current) audioRef.current.src = url;
           addLog("语音生成成功！");
 
-          // Auto Save
           if (projectId) {
               addLog("正在自动保存至项目...");
               await handleSaveToProject(url);
@@ -359,15 +359,9 @@ const VoiceStudio: React.FC = () => {
       try {
           const mergedUrl = await performMerge(audioUrl1, audioUrl2);
           setFinalAudioUrl(mergedUrl);
-          
           if (audioRef.current) audioRef.current.src = mergedUrl;
-          
           addLog("合并成功！");
-          
-          if (projectId) {
-              await handleSaveToProject(mergedUrl);
-          }
-
+          if (projectId) await handleSaveToProject(mergedUrl);
       } catch (e: any) {
           setErrorMsg(e.message);
           addLog(`合并失败: ${e.message}`);
@@ -411,6 +405,41 @@ const VoiceStudio: React.FC = () => {
   const downloadFileName = projectTitle 
       ? `${projectTitle.replace(/[\\/:*?"<>|]/g, "_")}.mp3`
       : `tts_${Date.now()}.mp3`;
+
+  // --- Stats Calculation ---
+  const totalCharsUsed = useMemo(() => usageLogs.reduce((acc, log) => acc + log.charCount, 0), [usageLogs]);
+  
+  const chartData = useMemo(() => {
+      const now = new Date();
+      const labels = [];
+      const data = [];
+      
+      // Initialize map for last N days
+      const dateMap = new Map<string, number>();
+      for (let i = chartPeriod - 1; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          const key = `${d.getMonth() + 1}/${d.getDate()}`;
+          dateMap.set(key, 0);
+          labels.push(key);
+      }
+
+      // Aggregate usage
+      usageLogs.forEach(log => {
+          const d = new Date(log.timestamp);
+          const key = `${d.getMonth() + 1}/${d.getDate()}`;
+          if (dateMap.has(key)) {
+              dateMap.set(key, (dateMap.get(key) || 0) + log.charCount);
+          }
+      });
+
+      // Build data array ensuring order
+      labels.forEach(key => data.push(dateMap.get(key) || 0));
+      
+      const maxVal = Math.max(...data, 1); // Prevent division by zero
+      
+      return { labels, data, maxVal };
+  }, [usageLogs, chartPeriod]);
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
@@ -500,24 +529,75 @@ const VoiceStudio: React.FC = () => {
               </div>
           )}
 
-          {/* Presets */}
-          <div className="shrink-0">
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">系统预置</label>
-            <select
-                value={customVoiceId ? "" : selectedPresetId}
-                onChange={(e) => { if (e.target.value) handleSelectPreset(e.target.value); }}
-                className={`w-full px-3 py-3 text-xs font-bold bg-white border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer transition-colors ${customVoiceId ? 'text-slate-400 bg-slate-50' : 'text-slate-700'}`}
-            >
-                {customVoiceId && <option value="" disabled>-- 自定义 Voice ID 激活中 --</option>}
-                {PRESET_VOICES.map(voice => (<option key={voice.id} value={voice.id}>{voice.name} · {voice.gender}</option>))}
-            </select>
+          {/* Stats Section */}
+          <div className="shrink-0 space-y-4 pt-4 border-t border-slate-100">
+             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> 用量统计</label>
+             
+             {/* Total Table */}
+             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                 <table className="w-full text-xs text-left">
+                     <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                         <tr>
+                             <th className="py-2 px-3 w-10 text-center">#</th>
+                             <th className="py-2 px-3">用户</th>
+                             <th className="py-2 px-3 text-right">已使用字符</th>
+                         </tr>
+                     </thead>
+                     <tbody className="text-slate-700">
+                         <tr>
+                             <td className="py-2 px-3 text-center border-r border-slate-50">1</td>
+                             <td className="py-2 px-3 border-r border-slate-50 font-bold">管理员</td>
+                             <td className="py-2 px-3 text-right font-mono font-bold text-violet-600">{totalCharsUsed.toLocaleString()}</td>
+                         </tr>
+                     </tbody>
+                 </table>
+             </div>
+
+             {/* Chart Controls */}
+             <div className="flex items-center justify-between">
+                 <span className="text-[10px] font-bold text-slate-400">每日趋势</span>
+                 <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                     {[7, 14, 30].map(d => (
+                         <button 
+                            key={d} 
+                            onClick={() => setChartPeriod(d)}
+                            className={`text-[9px] px-2 py-0.5 rounded-md font-bold transition-all ${chartPeriod === d ? 'bg-white shadow text-violet-600' : 'text-slate-400 hover:text-slate-600'}`}
+                         >
+                             {d}天
+                         </button>
+                     ))}
+                 </div>
+             </div>
+
+             {/* CSS Bar Chart */}
+             <div className="h-28 flex items-end gap-1 pt-4 pb-1 border-b border-slate-100 relative">
+                 {chartData.data.map((val, i) => (
+                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
+                         {/* Bar */}
+                         <div 
+                            className="w-full bg-violet-200 hover:bg-violet-400 rounded-t-sm transition-all relative group-hover:shadow-md"
+                            style={{ height: `${(val / chartData.maxVal) * 100}%`, minHeight: val > 0 ? '4px' : '0' }}
+                         >
+                             {/* Tooltip */}
+                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
+                                 {val}
+                             </div>
+                         </div>
+                         {/* Date Label */}
+                         <span className="text-[8px] font-medium text-slate-400 -rotate-45 origin-top-left translate-y-2 whitespace-nowrap absolute bottom-0 left-1/2">{chartData.labels[i]}</span>
+                     </div>
+                 ))}
+                 {chartData.data.every(v => v === 0) && (
+                     <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-300 italic">暂无数据</div>
+                 )}
+             </div>
           </div>
           
           {/* Console */}
-          <div className="flex-1 flex flex-col justify-end min-h-[150px]">
+          <div className="flex-1 flex flex-col justify-end min-h-[120px]">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Activity className="w-3.5 h-3.5" /> 生成进度</label>
              <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
-                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-32">
+                <div className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-24">
                     {consoleLogs.map((log, i) => (
                         <div key={i} className="text-slate-300">{log}</div>
                     ))}
