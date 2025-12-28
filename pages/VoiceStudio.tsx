@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 // Default fallback voice if no custom ID is provided (Rachel)
@@ -239,7 +239,24 @@ const VoiceStudio: React.FC = () => {
       }
 
       if (streamMode) {
-          const blob = await response.blob();
+          // Robust stream reading
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error("浏览器不支持流式读取");
+          
+          const chunks: Uint8Array[] = [];
+          let receivedLength = 0;
+          
+          while(true) {
+              const {done, value} = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              receivedLength += value.length;
+          }
+          
+          if (receivedLength === 0) throw new Error("服务端返回了空数据流");
+          
+          const blob = new Blob(chunks, { type: 'audio/mpeg' });
+          addLog(`--> 数据接收完成: ${(receivedLength/1024).toFixed(1)} KB`);
           return URL.createObjectURL(blob);
       } else {
           const data = await response.json();
@@ -357,18 +374,17 @@ const VoiceStudio: React.FC = () => {
       addLog("🚀 开始生成任务 (Stream Mode)...");
 
       try {
-          addLog("--> 正在请求音频流...");
+          addLog("--> 正在请求音频流 (Download)...");
           // 1. Force Stream Mode: This downloads the audio to the browser directly
-          // preventing server-side timeouts on long generation (Cloudflare limit).
           const blobUrl = await callTtsApi(text, true); 
           
           if (!blobUrl) throw new Error("API 返回了空数据");
 
-          addLog("--> ✅ 音频流接收成功");
+          addLog("--> ✅ 音频流接收成功，准备播放");
 
           // 2. Critical Path: Update UI IMMEDIATELY
           setFinalAudioUrl(blobUrl);
-          setLoading(false); // Stop loading so player appears
+          setLoading(false); 
           
           // Play Audio Safely
           setTimeout(() => {
@@ -379,7 +395,6 @@ const VoiceStudio: React.FC = () => {
           }, 200);
           
           // 3. Background Pipeline: Convert Blob -> Upload -> Save Project
-          // Run as non-blocking async task
           (async () => {
               try {
                   await recordUsage(text.length);
@@ -412,13 +427,16 @@ const VoiceStudio: React.FC = () => {
                       
                       setIsSavedToProject(true);
                       addLog("--> 💾 项目音频文件已更新");
+                      
+                      // Upgrade local blob URL to cloud URL silently
+                      setFinalAudioUrl(cloudUrl);
                   } else {
                       addLog("⚠️ 项目未找到，无法关联文件");
                   }
 
               } catch (bgErr: any) {
                   console.error("Background pipeline failed", bgErr);
-                  addLog(`⚠️ 后台处理失败: ${bgErr.message}`);
+                  addLog(`⚠️ 后台上传失败，请点击“保存到项目”手动重试`);
               }
           })();
 
@@ -458,19 +476,25 @@ const VoiceStudio: React.FC = () => {
   };
 
   const handleSaveToProject = async (urlOverride?: string) => {
-      const targetUrl = urlOverride || finalAudioUrl;
+      let targetUrl = urlOverride || finalAudioUrl;
       
       if (!projectId) { console.warn("No Project ID"); return; }
       if (!targetUrl) { console.warn("No Audio URL"); return; }
       
-      // Prevent saving local blob URLs directly (unless handled by upstream logic like handleGenerateSingle)
-      if (targetUrl.startsWith('blob:')) {
-          alert("当前是预览音频，请等待后台上传完成或重新生成。");
-          return;
-      }
-
       setSavingToProject(true);
       try {
+          // If the audio is currently a local blob, we MUST upload it first
+          if (targetUrl.startsWith('blob:')) {
+              addLog("🔄 检测到本地临时音频，正在上传...");
+              const blob = await fetch(targetUrl).then(r => r.blob());
+              const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+              
+              const cloudUrl = await storage.uploadFile(file, projectId);
+              addLog("✅ 上传成功！");
+              targetUrl = cloudUrl; // Use new cloud URL
+              setFinalAudioUrl(cloudUrl); // Update UI
+          }
+
           const project = await storage.getProject(projectId);
           if (project) {
                const updated = { 
@@ -480,11 +504,11 @@ const VoiceStudio: React.FC = () => {
                };
                await storage.saveProject(updated);
                storage.uploadProjects().catch(console.error);
-               addLog(`✅ 项目音频已手动更新`);
+               addLog(`✅ 项目音频已关联`);
                setIsSavedToProject(true);
           }
       } catch(e: any) {
-          addLog(`保存失败: ${e.message}`);
+          addLog(`❌ 保存失败: ${e.message}`);
       } finally {
           setSavingToProject(false);
       }
@@ -812,7 +836,7 @@ const VoiceStudio: React.FC = () => {
                         <Download className="w-4 h-4" />
                       </a>
                       
-                      {projectId && !finalAudioUrl.startsWith('blob:') && (
+                      {projectId && (
                          <>
                             <div className="w-px h-4 bg-slate-200 mx-2" />
                             <button 
@@ -824,8 +848,8 @@ const VoiceStudio: React.FC = () => {
                                     : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100'
                                 }`}
                             >
-                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-                                {isSavedToProject ? '已上传项目文件' : '手动保存到项目'}
+                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : (finalAudioUrl.startsWith('blob:') ? <CloudUpload className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />)}
+                                {isSavedToProject ? '已上传项目文件' : (finalAudioUrl.startsWith('blob:') ? '上传并保存' : '手动保存')}
                             </button>
                          </>
                       )}
