@@ -363,36 +363,20 @@ const ProjectWorkspace: React.FC = () => {
     return () => { if(saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [id]);
 
-  const updateProjectAndSyncImmediately = (updated: ProjectData, forceCloudSync = false) => {
+  const updateProjectAndSyncImmediately = (updated: ProjectData, forceCloudSync = true) => {
       setProject(updated);
       
       // 1. Save Locally Immediately (Fixes refresh data loss)
       storage.saveProject(updated).catch(console.error);
 
-      if (forceCloudSync) {
-          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-          setSyncStatus('saving');
-          // Immediate cloud upload
-          storage.uploadProjects()
-              .then(() => setSyncStatus('synced'))
-              .catch(() => setSyncStatus('error'));
-          return;
-      }
-
-      setSyncStatus('pending'); 
-      
+      // 2. Immediate Cloud Upload (No delay)
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       
-      // 2. Debounce Cloud Sync (8s)
-      saveTimerRef.current = setTimeout(async () => {
-          setSyncStatus('saving');
-          try {
-              await storage.uploadProjects();
-              setSyncStatus('synced');
-          } catch { 
-              setSyncStatus('error'); 
-          }
-      }, 8000);
+      setSyncStatus('saving');
+      // Immediate cloud upload
+      storage.uploadProjects()
+          .then(() => setSyncStatus('synced'))
+          .catch(() => setSyncStatus('error'));
   };
 
   const handleNodeAction = async (nodeId: string) => {
