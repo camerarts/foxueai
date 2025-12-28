@@ -358,7 +358,8 @@ const VoiceStudio: React.FC = () => {
 
       try {
           addLog("--> 正在请求音频流...");
-          // 1. Force Stream Mode for robustness on long text (avoids 504 timeouts on server)
+          // 1. Force Stream Mode: This downloads the audio to the browser directly
+          // preventing server-side timeouts on long generation (Cloudflare limit).
           const blobUrl = await callTtsApi(text, true); 
           
           if (!blobUrl) throw new Error("API 返回了空数据");
@@ -367,7 +368,7 @@ const VoiceStudio: React.FC = () => {
 
           // 2. Critical Path: Update UI IMMEDIATELY
           setFinalAudioUrl(blobUrl);
-          setLoading(false); 
+          setLoading(false); // Stop loading so player appears
           
           // Play Audio Safely
           setTimeout(() => {
@@ -377,23 +378,24 @@ const VoiceStudio: React.FC = () => {
               }
           }, 200);
           
-          // 3. Background Pipeline: Stats -> Convert Blob -> Upload -> Save Project
+          // 3. Background Pipeline: Convert Blob -> Upload -> Save Project
+          // Run as non-blocking async task
           (async () => {
               try {
                   await recordUsage(text.length);
                   
                   if (!projectId) {
-                      addLog("--> ℹ️ 临时任务，仅提供试听");
+                      addLog("--> ℹ️ 临时任务，未关联项目，仅试听");
                       return;
                   }
 
-                  addLog("--> 🔄 正在后台转码并上传...");
+                  addLog("--> 🔄 正在后台上传至云端...");
                   
-                  // Convert Blob URL to File
+                  // Convert Blob URL back to Blob/File for upload
                   const blob = await fetch(blobUrl).then(r => r.blob());
                   const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
                   
-                  // Client-side Upload to R2 (bypassing server timeout limits)
+                  // Client-side Upload to R2
                   const cloudUrl = await storage.uploadFile(file, projectId);
                   addLog(`--> ✅ 上传成功!`);
                   
@@ -406,10 +408,10 @@ const VoiceStudio: React.FC = () => {
                           moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
                       };
                       await storage.saveProject(updated);
-                      await storage.uploadProjects(); // Sync D1
+                      await storage.uploadProjects(); // Sync to D1
                       
                       setIsSavedToProject(true);
-                      addLog("--> 💾 项目音频文件已更新至云端");
+                      addLog("--> 💾 项目音频文件已更新");
                   } else {
                       addLog("⚠️ 项目未找到，无法关联文件");
                   }
