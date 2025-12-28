@@ -190,6 +190,12 @@ const VoiceStudio: React.FC = () => {
   const handleSplitText = () => {
       if (!text) return;
       
+      // Enforce 1700 char limit rule for splitting
+      if (text.length <= 1700) {
+          alert("文本未超过 1700 字符，无需使用拆分功能，直接生成即可。");
+          return;
+      }
+      
       const limit = Math.ceil(text.length / 2);
       
       // Smart split logic: find closest sentence ending near middle
@@ -528,8 +534,9 @@ const VoiceStudio: React.FC = () => {
                       {!isSplitMode && (
                           <button 
                             onClick={handleSplitText}
-                            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold flex items-center gap-2 transition-all"
-                            title="文本超过1700字时建议使用"
+                            disabled={text.length <= 1700}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${text.length > 1700 ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-slate-50 text-slate-300 cursor-not-allowed'}`}
+                            title={text.length > 1700 ? "文本超过1700字时建议使用" : "文本未超过1700字，无需拆分"}
                           >
                               <Split className="w-3.5 h-3.5" /> 拆分文本
                           </button>
