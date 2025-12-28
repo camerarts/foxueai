@@ -261,18 +261,40 @@ const VoiceStudio: React.FC = () => {
     }
   };
 
-  // --- Step 2: Generate Dual Audio ---
+  // Core API Logic for Merging
+  const performMerge = async (u1: string, u2: string): Promise<string> => {
+      const response = await fetch('/api/audio/merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+              url1: u1, 
+              url2: u2, 
+              projectId: projectId 
+          })
+      });
+
+      if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Merge failed');
+      }
+
+      const data = await response.json();
+      return data.url;
+  };
+
+  // --- Step 2: Generate Dual Audio (And Auto Merge/Save) ---
   const handleGenerateDual = async () => {
       if (!textPart1 || !textPart2) return;
       setLoading(true);
       setErrorMsg(null);
       setAudioUrl1(null);
       setAudioUrl2(null);
+      setFinalAudioUrl(null);
       
       addLog("开始并行生成两段语音...");
 
       try {
-          // Parallel Generation using non-streaming (cached) endpoint for better quality/stability
+          // 1. Parallel Generation
           const [res1, res2] = await Promise.all([
               callTtsApi(textPart1, false),
               callTtsApi(textPart2, false)
@@ -280,24 +302,46 @@ const VoiceStudio: React.FC = () => {
 
           setAudioUrl1(res1);
           setAudioUrl2(res2);
-          addLog("两段语音生成完毕，进入合并阶段");
-          setStep(3);
+          addLog("两段语音生成完毕，正在请求自动合并...");
+          
+          setStep(3); // Visual cue
+
+          // 2. Auto Merge
+          const mergedUrl = await performMerge(res1, res2);
+          setFinalAudioUrl(mergedUrl);
+          
+          if (audioRef.current) audioRef.current.src = mergedUrl;
+          addLog("合并成功！");
+
+          // 3. Auto Save to Project
+          if (projectId) {
+              addLog("正在自动保存至项目...");
+              await handleSaveToProject(mergedUrl);
+          }
+
       } catch (e: any) {
           setErrorMsg(e.message);
-          addLog(`生成失败: ${e.message}`);
+          addLog(`流程失败: ${e.message}`);
       } finally {
           setLoading(false);
       }
   };
 
-  // --- Single Generate (No Split) ---
+  // --- Single Generate (And Auto Save) ---
   const handleGenerateSingle = async () => {
       setLoading(true);
+      setErrorMsg(null);
       try {
           const url = await callTtsApi(text, false);
           setFinalAudioUrl(url);
           if (audioRef.current) audioRef.current.src = url;
-          addLog("完整语音生成成功");
+          addLog("语音生成成功！");
+
+          // Auto Save
+          if (projectId) {
+              addLog("正在自动保存至项目...");
+              await handleSaveToProject(url);
+          }
       } catch (e: any) {
           setErrorMsg(e.message);
           addLog(`生成失败: ${e.message}`);
@@ -306,40 +350,22 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Step 3: Merge Audio ---
+  // --- Manual Merge Trigger (Backup) ---
   const handleMerge = async () => {
       if (!audioUrl1 || !audioUrl2) return;
       setLoading(true);
-      addLog("请求云端极速合并...");
+      addLog("手动请求合并...");
 
       try {
-          // New optimized flow: Server-side merge
-          // Send the two existing R2 URLs (paths) to the server
-          const response = await fetch('/api/audio/merge', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                  url1: audioUrl1, 
-                  url2: audioUrl2, 
-                  projectId: projectId 
-              })
-          });
-
-          if (!response.ok) {
-              const err = await response.json();
-              throw new Error(err.error || 'Merge failed');
-          }
-
-          const data = await response.json();
-          setFinalAudioUrl(data.url);
+          const mergedUrl = await performMerge(audioUrl1, audioUrl2);
+          setFinalAudioUrl(mergedUrl);
           
-          if (audioRef.current) audioRef.current.src = data.url;
+          if (audioRef.current) audioRef.current.src = mergedUrl;
           
-          addLog("云端合并成功！");
+          addLog("合并成功！");
           
-          // If in project context, auto save
           if (projectId) {
-              await handleSaveToProject(data.url);
+              await handleSaveToProject(mergedUrl);
           }
 
       } catch (e: any) {
@@ -369,10 +395,10 @@ const VoiceStudio: React.FC = () => {
                };
                await storage.saveProject(updated);
                storage.uploadProjects().catch(console.error);
-               addLog(`已保存到项目: ${project.title}`);
-               alert(`已成功保存到项目 "${project.title}" 的音频文件中！`);
+               addLog(`已成功保存到项目 "${project.title}" 的音频文件中！`);
           }
       } catch(e: any) {
+          addLog(`保存失败: ${e.message}`);
           alert("保存失败: " + e.message);
       } finally {
           setSavingToProject(false);
@@ -548,7 +574,7 @@ const VoiceStudio: React.FC = () => {
                             className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-violet-500/20"
                           >
                               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 
-                              语音生成 (2段)
+                              语音生成 + 自动合并
                           </button>
                       )}
                       {isSplitMode && step === 3 && (
@@ -558,7 +584,7 @@ const VoiceStudio: React.FC = () => {
                             className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-fuchsia-500/20"
                           >
                               {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />} 
-                              极速合并 & 上传
+                              手动重试合并
                           </button>
                       )}
                   </div>
@@ -659,7 +685,7 @@ const VoiceStudio: React.FC = () => {
                               className="px-6 py-2.5 rounded-xl font-bold text-sm text-white bg-slate-900 hover:bg-violet-600 transition-all shadow-lg hover:shadow-violet-500/30 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings2 className="w-4 h-4" />}
-                               生成完整音频
+                               生成并自动保存
                             </button>
                         </>
                     ) : (
