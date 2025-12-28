@@ -57,6 +57,7 @@ const VoiceStudio: React.FC = () => {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState<string | null>(null);
   const [savingToProject, setSavingToProject] = useState(false);
+  const [isSavedToProject, setIsSavedToProject] = useState(false);
   
   // Operation State
   const [loading, setLoading] = useState(false);
@@ -287,6 +288,7 @@ const VoiceStudio: React.FC = () => {
       setAudioUrl1(null);
       setAudioUrl2(null);
       setFinalAudioUrl(null);
+      setIsSavedToProject(false);
       
       addLog("开始并行生成两段语音...");
 
@@ -328,6 +330,7 @@ const VoiceStudio: React.FC = () => {
   const handleGenerateSingle = async () => {
       setLoading(true);
       setErrorMsg(null);
+      setIsSavedToProject(false);
       try {
           const url = await callTtsApi(text, false);
           
@@ -354,6 +357,7 @@ const VoiceStudio: React.FC = () => {
   const handleMerge = async () => {
       if (!audioUrl1 || !audioUrl2) return;
       setLoading(true);
+      setIsSavedToProject(false);
       addLog("手动请求合并...");
 
       try {
@@ -390,6 +394,7 @@ const VoiceStudio: React.FC = () => {
                await storage.saveProject(updated);
                storage.uploadProjects().catch(console.error);
                addLog(`已成功保存到项目 "${project.title}" 的音频文件中！`);
+               setIsSavedToProject(true);
           }
       } catch(e: any) {
           addLog(`保存失败: ${e.message}`);
@@ -735,12 +740,16 @@ const VoiceStudio: React.FC = () => {
                          <>
                             <div className="w-px h-4 bg-slate-200 mx-2" />
                             <button 
-                                onClick={() => handleSaveToProject()}
-                                disabled={savingToProject}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-100 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
+                                onClick={() => !isSavedToProject && handleSaveToProject()}
+                                disabled={savingToProject || isSavedToProject}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                                    isSavedToProject 
+                                    ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-default' 
+                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100'
+                                }`}
                             >
-                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                                保存到项目
+                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                                {isSavedToProject ? '已上传项目文件' : '保存到项目'}
                             </button>
                          </>
                       )}
