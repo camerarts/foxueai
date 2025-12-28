@@ -337,6 +337,7 @@ const VoiceStudio: React.FC = () => {
   };
 
   // --- Single Generate (And Auto Save) ---
+  // Fix: Decoupled UI update from saving logic to ensure audio shows up immediately
   const handleGenerateSingle = async () => {
       if (!text) {
           alert("请输入文本内容");
@@ -346,20 +347,21 @@ const VoiceStudio: React.FC = () => {
       setLoading(true);
       setErrorMsg(null);
       setIsSavedToProject(false);
-      setFinalAudioUrl(null); // Clear previous
+      setFinalAudioUrl(null); 
 
       try {
           addLog("正在请求 API 生成语音...");
+          // 1. Critical Path: Get Audio URL
           const url = await callTtsApi(text, false);
           
           if (!url) throw new Error("API 返回了空链接");
 
+          // 2. Critical Path: Update UI IMMEDIATELY
+          setFinalAudioUrl(url);
+          setLoading(false); // Stop loading indicator so user sees the player
           addLog("语音生成成功，准备播放...");
           
-          // 1. Update UI Immediately
-          setFinalAudioUrl(url);
-          
-          // 2. Safely Update Audio Element (Wait for DOM update)
+          // Play Audio Safely
           setTimeout(() => {
               if (audioRef.current) {
                   audioRef.current.src = url;
@@ -367,10 +369,10 @@ const VoiceStudio: React.FC = () => {
               }
           }, 100);
           
-          // 3. Record Usage
-          await recordUsage(text.length);
+          // 3. Side Effects: Stats (Non-blocking)
+          recordUsage(text.length).catch(err => console.error("Stats error", err));
 
-          // 4. Auto Save to Project (Isolated Logic)
+          // 4. Side Effects: Auto Save to Project (Non-blocking)
           if (projectId) {
               addLog("正在自动保存至项目...");
               try {
@@ -378,14 +380,13 @@ const VoiceStudio: React.FC = () => {
               } catch (saveError: any) {
                   console.error("Auto-save failed", saveError);
                   addLog(`⚠️ 自动保存失败: ${saveError.message}`);
-                  // Do not re-throw, allow user to manually save
               }
           }
       } catch (e: any) {
+          // Only stop loading here if it wasn't stopped above
+          setLoading(false);
           setErrorMsg(e.message);
           addLog(`❌ 生成失败: ${e.message}`);
-      } finally {
-          setLoading(false);
       }
   };
 
@@ -634,15 +635,13 @@ const VoiceStudio: React.FC = () => {
              <div className="h-28 flex items-end gap-1 pt-4 pb-1 border-b border-slate-100 relative">
                  {chartData.data.map((val, i) => (
                      <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
+                         {/* Bar Label (Always Visible) */}
+                         <span className="text-[9px] text-slate-400 font-mono mb-0.5">{val > 0 ? val : ''}</span>
                          {/* Bar */}
                          <div 
                             className="w-full bg-violet-200 hover:bg-violet-400 rounded-t-sm transition-all relative group-hover:shadow-md"
                             style={{ height: `${(val / chartData.maxVal) * 100}%`, minHeight: val > 0 ? '4px' : '0' }}
                          >
-                             {/* Tooltip */}
-                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-800 text-white text-[9px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                                 {val}
-                             </div>
                          </div>
                          {/* Date Label */}
                          <span className="text-[8px] font-medium text-slate-400 -rotate-45 origin-top-left translate-y-2 whitespace-nowrap absolute bottom-0 left-1/2">{chartData.labels[i]}</span>
