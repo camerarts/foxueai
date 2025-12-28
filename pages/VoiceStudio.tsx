@@ -235,6 +235,7 @@ const VoiceStudio: React.FC = () => {
           return URL.createObjectURL(blob);
       } else {
           const data = await response.json();
+          if (!data.url) throw new Error("API 返回了成功状态，但未包含有效的音频 URL");
           return data.url;
       }
   };
@@ -308,14 +309,23 @@ const VoiceStudio: React.FC = () => {
           setStep(3); 
 
           const mergedUrl = await performMerge(res1, res2);
+          
+          // Priority 1: Update UI State
           setFinalAudioUrl(mergedUrl);
           
           if (audioRef.current) audioRef.current.src = mergedUrl;
           addLog("合并成功！");
 
+          // Priority 2: Auto Save (Isolated Try-Catch)
           if (projectId) {
               addLog("正在自动保存至项目...");
-              await handleSaveToProject(mergedUrl);
+              try {
+                  await handleSaveToProject(mergedUrl);
+              } catch (saveErr: any) {
+                  console.error("Auto save failed", saveErr);
+                  addLog(`⚠️ 自动保存失败: ${saveErr.message}`);
+                  // Do not throw, keep UI showing the generated audio
+              }
           }
 
       } catch (e: any) {
@@ -328,26 +338,52 @@ const VoiceStudio: React.FC = () => {
 
   // --- Single Generate (And Auto Save) ---
   const handleGenerateSingle = async () => {
+      if (!text) {
+          alert("请输入文本内容");
+          return;
+      }
+
       setLoading(true);
       setErrorMsg(null);
       setIsSavedToProject(false);
+      setFinalAudioUrl(null); // Clear previous
+
       try {
+          addLog("正在请求 API 生成语音...");
           const url = await callTtsApi(text, false);
           
-          // Record Usage
+          if (!url) throw new Error("API 返回了空链接");
+
+          addLog("语音生成成功，准备播放...");
+          
+          // 1. Update UI Immediately
+          setFinalAudioUrl(url);
+          
+          // 2. Safely Update Audio Element (Wait for DOM update)
+          setTimeout(() => {
+              if (audioRef.current) {
+                  audioRef.current.src = url;
+                  audioRef.current.play().catch(console.warn);
+              }
+          }, 100);
+          
+          // 3. Record Usage
           await recordUsage(text.length);
 
-          setFinalAudioUrl(url);
-          if (audioRef.current) audioRef.current.src = url;
-          addLog("语音生成成功！");
-
+          // 4. Auto Save to Project (Isolated Logic)
           if (projectId) {
               addLog("正在自动保存至项目...");
-              await handleSaveToProject(url);
+              try {
+                  await handleSaveToProject(url);
+              } catch (saveError: any) {
+                  console.error("Auto-save failed", saveError);
+                  addLog(`⚠️ 自动保存失败: ${saveError.message}`);
+                  // Do not re-throw, allow user to manually save
+              }
           }
       } catch (e: any) {
           setErrorMsg(e.message);
-          addLog(`生成失败: ${e.message}`);
+          addLog(`❌ 生成失败: ${e.message}`);
       } finally {
           setLoading(false);
       }
@@ -365,7 +401,14 @@ const VoiceStudio: React.FC = () => {
           setFinalAudioUrl(mergedUrl);
           if (audioRef.current) audioRef.current.src = mergedUrl;
           addLog("合并成功！");
-          if (projectId) await handleSaveToProject(mergedUrl);
+          
+          if (projectId) {
+              try {
+                  await handleSaveToProject(mergedUrl);
+              } catch (e: any) {
+                  addLog(`⚠️ 自动保存失败: ${e.message}`);
+              }
+          }
       } catch (e: any) {
           setErrorMsg(e.message);
           addLog(`合并失败: ${e.message}`);
@@ -376,7 +419,15 @@ const VoiceStudio: React.FC = () => {
 
   const handleSaveToProject = async (urlOverride?: string) => {
       const targetUrl = urlOverride || finalAudioUrl;
-      if (!targetUrl || !projectId) return;
+      
+      if (!projectId) {
+          console.warn("Cannot save: No Project ID");
+          return;
+      }
+      if (!targetUrl) {
+          console.warn("Cannot save: No Audio URL");
+          return;
+      }
       if (targetUrl.startsWith('blob:')) {
           alert("请先生成完整音频（非试听）以获取可保存的文件。");
           return;
@@ -392,13 +443,18 @@ const VoiceStudio: React.FC = () => {
                    moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
                };
                await storage.saveProject(updated);
+               
+               // Non-blocking upload
                storage.uploadProjects().catch(console.error);
-               addLog(`已成功保存到项目 "${project.title}" 的音频文件中！`);
+               
+               addLog(`✅ 已成功保存到项目 "${project.title}" 的音频文件中！`);
                setIsSavedToProject(true);
+          } else {
+              throw new Error("项目不存在或已删除");
           }
       } catch(e: any) {
-          addLog(`保存失败: ${e.message}`);
-          alert("保存失败: " + e.message);
+          // Let the caller handle error display if needed, but here we just throw
+          throw e;
       } finally {
           setSavingToProject(false);
       }
