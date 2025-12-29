@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 // Default fallback voice if no custom ID is provided (Rachel)
@@ -32,6 +32,7 @@ const VoiceStudio: React.FC = () => {
   // Workflow State: 1=Input/Split, 2=Generate, 3=Merge
   const [step, setStep] = useState(1);
   const [isSplitMode, setIsSplitMode] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(50);
 
   // Text State
   const [text, setText] = useState('');
@@ -199,25 +200,66 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Step 1: Split Text ---
+  // --- Smart Split Logic ---
+  const performSmartSplit = (ratio: number) => {
+      if (!text) return;
+      
+      const targetLen = Math.floor(text.length * (ratio / 100));
+      // Prioritize delimiters to ensure we don't break mid-sentence
+      const delimiters = ['\n', '。', '！', '？', '.', '!', '?'];
+      
+      // Search outwards from targetLen for nearest delimiter
+      let splitIndex = targetLen;
+      let found = false;
+      
+      // Search range (scan outwards)
+      // We limit the search to avoid scanning the entire text if not needed, 
+      // but here we scan until we find one or hit ends for safety.
+      for (let offset = 0; offset < text.length; offset++) {
+          const right = targetLen + offset;
+          const left = targetLen - offset;
+          
+          // Check right first (often natural reading flow prefers finishing the thought slightly later)
+          if (right < text.length && delimiters.includes(text[right])) {
+              splitIndex = right + 1; // Include the delimiter in the first part
+              found = true;
+              break;
+          }
+          if (left >= 0 && delimiters.includes(text[left])) {
+              splitIndex = left + 1;
+              found = true;
+              break;
+          }
+          // Optimization: if we've gone too far (e.g. 2000 chars) without finding a delimiter, maybe just break hard?
+          // For now, let's keep searching to guarantee sentence integrity.
+      }
+      
+      if (!found) splitIndex = targetLen; // Fallback if no delimiters exist
+
+      setTextPart1(text.substring(0, splitIndex));
+      setTextPart2(text.substring(splitIndex));
+  };
+
   const handleSplitText = () => {
       if (!text) return;
       if (text.length <= 1700) {
           alert("文本未超过 1700 字符，无需使用拆分功能，直接生成即可。");
           return;
       }
-      const limit = Math.ceil(text.length / 2);
-      let splitIdx = text.lastIndexOf('。', limit + 100);
-      if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('.', limit + 100);
-      if (splitIdx === -1 || splitIdx < limit - 200) splitIdx = text.lastIndexOf('\n', limit + 100);
-      if (splitIdx === -1) splitIdx = limit;
-      else splitIdx += 1;
-
-      setTextPart1(text.substring(0, splitIdx));
-      setTextPart2(text.substring(splitIdx));
+      
+      // Default to 50% split
+      setSplitRatio(50);
+      performSmartSplit(50);
+      
       setIsSplitMode(true);
       setStep(2);
-      addLog(`文本已拆分为两部分 (P1: ${splitIdx}, P2: ${text.length - splitIdx})`);
+      addLog(`文本已进入拆分模式`);
+  };
+
+  const handleRatioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = parseInt(e.target.value);
+      setSplitRatio(val);
+      performSmartSplit(val);
   };
 
   const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
@@ -782,30 +824,50 @@ const VoiceStudio: React.FC = () => {
               {/* Text Input Area */}
               <div className="flex-1 flex flex-col min-h-[300px]">
                 {isSplitMode ? (
-                    <div className="flex gap-4 h-full">
-                        <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
-                            <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
-                                <span className="text-xs font-bold text-slate-500">第一部分</span>
-                                <span className="text-xs font-mono text-slate-400">{textPart1.length} chars</span>
+                    <div className="flex flex-col h-full gap-4">
+                        {/* Split Ratio Slider */}
+                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-xs font-bold text-slate-500 whitespace-nowrap">
+                                <Scaling className="w-4 h-4 text-violet-500" />
+                                拆分比例 <span className="bg-slate-100 px-1.5 py-0.5 rounded text-violet-600 font-mono">{splitRatio}%</span>
                             </div>
-                            <textarea 
-                                value={textPart1}
-                                onChange={(e) => setTextPart1(e.target.value)}
-                                className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
+                            <input 
+                                type="range" 
+                                min="10" 
+                                max="90" 
+                                value={splitRatio} 
+                                onChange={handleRatioChange}
+                                className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-violet-600"
+                                title="拖动滑块调整第一部分内容的比例（智能识别句子边界）"
                             />
-                            {audioUrl1 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl1} className="w-full h-8" /></div>}
+                            <span className="text-[10px] text-slate-400 font-medium">智能整句拆分</span>
                         </div>
-                        <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
-                            <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
-                                <span className="text-xs font-bold text-slate-500">第二部分</span>
-                                <span className="text-xs font-mono text-slate-400">{textPart2.length} chars</span>
+
+                        <div className="flex gap-4 flex-1">
+                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
+                                <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
+                                    <span className="text-xs font-bold text-slate-500">第一部分</span>
+                                    <span className="text-xs font-mono text-slate-400">{textPart1.length} chars</span>
+                                </div>
+                                <textarea 
+                                    value={textPart1}
+                                    onChange={(e) => setTextPart1(e.target.value)}
+                                    className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
+                                />
+                                {audioUrl1 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl1} className="w-full h-8" /></div>}
                             </div>
-                            <textarea 
-                                value={textPart2}
-                                onChange={(e) => setTextPart2(e.target.value)}
-                                className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
-                            />
-                            {audioUrl2 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl2} className="w-full h-8" /></div>}
+                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
+                                <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
+                                    <span className="text-xs font-bold text-slate-500">第二部分</span>
+                                    <span className="text-xs font-mono text-slate-400">{textPart2.length} chars</span>
+                                </div>
+                                <textarea 
+                                    value={textPart2}
+                                    onChange={(e) => setTextPart2(e.target.value)}
+                                    className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
+                                />
+                                {audioUrl2 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl2} className="w-full h-8" /></div>}
+                            </div>
                         </div>
                     </div>
                 ) : (
