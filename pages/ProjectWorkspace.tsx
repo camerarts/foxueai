@@ -10,7 +10,7 @@ import {
   Check, Images, ArrowRight, Palette, Film, Maximize2, Play, Pause,
   ZoomIn, ZoomOut, Move, RefreshCw, Rocket, AlertCircle, Archive,
   Cloud, CloudCheck, ArrowLeftRight, FileAudio, Upload, Trash2, Headphones, CheckCircle2, CloudUpload, Volume2, VolumeX, Wand2, Download, Music4, Clock, X, ClipboardPaste, Image as ImageIcon,
-  Mic
+  Mic, Merge
 } from 'lucide-react';
 
 const formatTimestamp = (ts?: number) => {
@@ -37,6 +37,7 @@ const CompactTimestamp = ({ ts }: { ts?: number }) => {
   );
 };
 
+// ... [Keep existing Helper Components: RowCopyButton, MiniInlineCopy, FancyAudioPlayer, TextResultBox] ...
 const RowCopyButton = ({ text }: { text: string }) => {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
@@ -320,6 +321,61 @@ const TextResultBox = ({ content, title, onSave, placeholder, showStats, readOnl
   );
 };
 
+// Helper: Frontend Audio Merge Logic
+const bufferToWave = (abuffer: AudioBuffer, len: number) => {
+  let numOfChan = abuffer.numberOfChannels,
+      length = len * numOfChan * 2 + 44,
+      buffer = new ArrayBuffer(length),
+      view = new DataView(buffer),
+      channels = [], i, sample,
+      offset = 0,
+      pos = 0;
+
+  // write WAVE header
+  setUint32(0x46464952);                         // "RIFF"
+  setUint32(length - 8);                         // file length - 8
+  setUint32(0x45564157);                         // "WAVE"
+
+  setUint32(0x20746d66);                         // "fmt " chunk
+  setUint32(16);                                 // length = 16
+  setUint16(1);                                  // PCM (uncompressed)
+  setUint16(numOfChan);
+  setUint32(abuffer.sampleRate);
+  setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+  setUint16(numOfChan * 2);                      // block-align
+  setUint16(16);                                 // 16-bit (hardcoded in this function)
+
+  setUint32(0x61746164);                         // "data" - chunk
+  setUint32(length - pos - 4);                   // chunk length
+
+  // write interleaved data
+  for(i = 0; i < abuffer.numberOfChannels; i++)
+    channels.push(abuffer.getChannelData(i));
+
+  while(pos < len) {
+    for(i = 0; i < numOfChan; i++) {             // interleave channels
+      sample = Math.max(-1, Math.min(1, channels[i][pos])); // clamp
+      sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; // scale to 16-bit signed int
+      view.setInt16(offset, sample, true);       // write 16-bit sample
+      offset += 2;
+    }
+    pos++;
+  }
+
+  // create Blob
+  return new Blob([buffer], {type: "audio/wav"});
+
+  function setUint16(data: number) {
+    view.setUint16(offset, data, true);
+    offset += 2;
+  }
+
+  function setUint32(data: number) {
+    view.setUint32(offset, data, true);
+    offset += 4;
+  }
+};
+
 const NODE_WIDTH = 278;
 const NODE_HEIGHT = 160;
 const NODES_CONFIG = [
@@ -349,6 +405,14 @@ const ProjectWorkspace: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Audio Merge State
+  const [isMergeTab, setIsMergeTab] = useState(false);
+  const [mergeFile1, setMergeFile1] = useState<File | null>(null);
+  const [mergeFile2, setMergeFile2] = useState<File | null>(null);
+  const [merging, setMerging] = useState(false);
+  const mergeInput1Ref = useRef<HTMLInputElement>(null);
+  const mergeInput2Ref = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -381,7 +445,11 @@ const ProjectWorkspace: React.FC = () => {
 
   const handleNodeAction = async (nodeId: string) => {
     if (!project) return;
-    if (nodeId === 'audio_file') { audioInputRef.current?.click(); return; }
+    if (nodeId === 'audio_file') { 
+        // Just focus the panel instead of instant upload
+        setSelectedNodeId('audio_file');
+        return; 
+    }
     if (['titles', 'summary', 'cover'].includes(nodeId) && !project.script) { alert("请先生成脚本"); return; }
 
     setGeneratingNodes(prev => new Set(prev).add(nodeId));
@@ -557,6 +625,53 @@ const ProjectWorkspace: React.FC = () => {
     }
   };
 
+  // Frontend Merge Logic
+  const handleClientMerge = async () => {
+      if (!mergeFile1 || !mergeFile2) return;
+      if (!project) return;
+
+      setMerging(true);
+      try {
+          // 1. Decode both files using AudioContext
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          
+          const buffer1 = await ctx.decodeAudioData(await mergeFile1.arrayBuffer());
+          const buffer2 = await ctx.decodeAudioData(await mergeFile2.arrayBuffer());
+
+          // 2. Create new buffer (length = sum of both)
+          const outputBuffer = ctx.createBuffer(
+              buffer1.numberOfChannels,
+              buffer1.length + buffer2.length,
+              buffer1.sampleRate
+          );
+
+          // 3. Copy channel data
+          for (let channel = 0; channel < buffer1.numberOfChannels; channel++) {
+              const outputData = outputBuffer.getChannelData(channel);
+              outputData.set(buffer1.getChannelData(channel), 0);
+              outputData.set(buffer2.getChannelData(channel), buffer1.length);
+          }
+
+          // 4. Encode to WAV Blob (using helper)
+          const wavBlob = bufferToWave(outputBuffer, outputBuffer.length);
+          const wavFile = new File([wavBlob], `merged_${Date.now()}.wav`, { type: 'audio/wav' });
+
+          // 5. Upload via standard function
+          await handleAudioUpload(wavFile);
+          
+          // Reset
+          setMergeFile1(null);
+          setMergeFile2(null);
+          setIsMergeTab(false); // Switch back to player view
+
+      } catch (err: any) {
+          console.error("Client merge failed", err);
+          alert(`合并失败: ${err.message} (可能是音频格式不兼容)`);
+      } finally {
+          setMerging(false);
+      }
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return; 
     setIsDragging(true);
@@ -596,6 +711,10 @@ const ProjectWorkspace: React.FC = () => {
   return (
     <div className="flex h-full relative bg-slate-50 overflow-hidden">
         <input type="file" ref={audioInputRef} className="hidden" accept="audio/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleAudioUpload(f); }} />
+        {/* Merge Inputs hidden, triggered by ref */}
+        <input type="file" ref={mergeInput1Ref} className="hidden" accept="audio/*" onChange={(e) => setMergeFile1(e.target.files?.[0] || null)} />
+        <input type="file" ref={mergeInput2Ref} className="hidden" accept="audio/*" onChange={(e) => setMergeFile2(e.target.files?.[0] || null)} />
+
         <div className="absolute top-6 left-6 z-20 flex items-center gap-3">
              <button onClick={() => navigate('/dashboard')} className="p-2 bg-white/50 rounded-full border hover:bg-white transition-all"><ArrowLeft className="w-5 h-5 text-slate-500" /></button>
              <h1 className="text-2xl font-black text-slate-400 select-none">{project.title}</h1>
@@ -712,29 +831,90 @@ const ProjectWorkspace: React.FC = () => {
                                 autoCleanAsterisks={true} 
                             />
                         </div>
-                        <div className="flex-[1] overflow-y-auto min-h-[220px]">
-                            <div className="space-y-4">
-                                {project.audioFile && (
-                                    <FancyAudioPlayer 
-                                        src={project.audioFile} 
-                                        fileName={project.audioFile.split('/').pop() || '音频文件.mp3'} 
-                                        downloadName={project.title}
-                                        isLocal={isUploading} 
-                                        isUploading={isUploading} 
-                                        uploadProgress={uploadProgress} 
-                                        onReplace={() => audioInputRef.current?.click()} 
-                                    />
-                                )}
-                                {!project.audioFile && <div onClick={() => audioInputRef.current?.click()} className="h-40 border-2 border-dashed border-slate-200 bg-white/50 backdrop-blur rounded-[32px] flex flex-col items-center justify-center gap-4 text-slate-400 cursor-pointer hover:bg-white hover:border-indigo-300 hover:text-indigo-600 transition-all group">
-                                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center group-hover:bg-indigo-50 transition-all">
-                                        {isUploading ? <Loader2 className="w-8 h-8 animate-spin text-indigo-600" /> : <Upload className="w-8 h-8" />}
-                                    </div>
-                                    <div className="text-center">
-                                        <span className="text-sm font-bold block">{isUploading ? `正在上传 ${Math.round(uploadProgress)}%` : '点击上传音频'}</span>
-                                        <span className="text-[10px] uppercase tracking-widest opacity-60">MP3, WAV, M4A supported</span>
-                                    </div>
-                                </div>}
+                        <div className="flex-[1] overflow-y-auto min-h-[260px] bg-white border border-slate-200 rounded-2xl p-4">
+                            {/* Toggle Header */}
+                            <div className="flex gap-2 p-1 bg-slate-100 rounded-lg mb-4">
+                                <button 
+                                    onClick={() => setIsMergeTab(false)} 
+                                    className={`flex-1 text-xs font-bold py-1.5 rounded-md transition-all ${!isMergeTab ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    直接上传
+                                </button>
+                                <button 
+                                    onClick={() => setIsMergeTab(true)} 
+                                    className={`flex-1 text-xs font-bold py-1.5 rounded-md transition-all flex items-center justify-center gap-1 ${isMergeTab ? 'bg-white shadow-sm text-fuchsia-600' : 'text-slate-400 hover:text-slate-600'}`}
+                                >
+                                    <Merge className="w-3 h-3" /> 合并工具
+                                </button>
                             </div>
+
+                            {/* Merge Tool View */}
+                            {isMergeTab ? (
+                                <div className="space-y-3">
+                                    <div 
+                                        onClick={() => mergeInput1Ref.current?.click()}
+                                        className={`border-2 border-dashed rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all ${mergeFile1 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'}`}
+                                    >
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${mergeFile1 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                            {mergeFile1 ? <FileAudio className="w-4 h-4" /> : <span className="text-xs font-bold">A</span>}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs font-bold truncate text-slate-700">{mergeFile1 ? mergeFile1.name : "选择音频文件 A"}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-center">
+                                        <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400"><span className="text-xs font-bold">+</span></div>
+                                    </div>
+
+                                    <div 
+                                        onClick={() => mergeInput2Ref.current?.click()}
+                                        className={`border-2 border-dashed rounded-xl p-3 flex items-center gap-3 cursor-pointer transition-all ${mergeFile2 ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'}`}
+                                    >
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${mergeFile2 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                            {mergeFile2 ? <FileAudio className="w-4 h-4" /> : <span className="text-xs font-bold">B</span>}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-xs font-bold truncate text-slate-700">{mergeFile2 ? mergeFile2.name : "选择音频文件 B"}</div>
+                                        </div>
+                                    </div>
+
+                                    <button 
+                                        onClick={handleClientMerge}
+                                        disabled={!mergeFile1 || !mergeFile2 || merging}
+                                        className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-xl py-2.5 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-fuchsia-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                    >
+                                        {merging ? <Loader2 className="w-4 h-4 animate-spin" /> : <Merge className="w-4 h-4" />}
+                                        {merging ? '合并中 (前端执行)...' : '执行合并并保存'}
+                                    </button>
+                                    <p className="text-[10px] text-center text-slate-400 mt-2">前端合成，不消耗服务器流量。支持 MP3/WAV 格式。</p>
+                                </div>
+                            ) : (
+                                // Standard Upload View
+                                <div className="space-y-4 h-full flex flex-col">
+                                    {project.audioFile ? (
+                                        <FancyAudioPlayer 
+                                            src={project.audioFile} 
+                                            fileName={project.audioFile.split('/').pop() || '音频文件.mp3'} 
+                                            downloadName={project.title}
+                                            isLocal={isUploading} 
+                                            isUploading={isUploading} 
+                                            uploadProgress={uploadProgress} 
+                                            onReplace={() => audioInputRef.current?.click()} 
+                                        />
+                                    ) : (
+                                        <div onClick={() => audioInputRef.current?.click()} className="flex-1 border-2 border-dashed border-slate-200 bg-slate-50/50 rounded-[20px] flex flex-col items-center justify-center gap-3 text-slate-400 cursor-pointer hover:bg-white hover:border-indigo-300 hover:text-indigo-600 transition-all group min-h-[140px]">
+                                            <div className="w-12 h-12 bg-white shadow-sm border border-slate-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                                                {isUploading ? <Loader2 className="w-6 h-6 animate-spin text-indigo-600" /> : <Upload className="w-6 h-6" />}
+                                            </div>
+                                            <div className="text-center">
+                                                <span className="text-xs font-bold block">{isUploading ? `正在上传 ${Math.round(uploadProgress)}%` : '点击上传音频文件'}</span>
+                                                <span className="text-[10px] uppercase tracking-widest opacity-60">MP3 / WAV / M4A</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                      </div>
                  )}
