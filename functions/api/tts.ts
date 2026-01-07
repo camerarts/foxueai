@@ -42,6 +42,8 @@ export const onRequestPost = async (context: any) => {
         }
 
         const auraUrl = `https://tts.aurastd.com/api/v1/tts`;
+        // Aura typically behaves better when generating a URL first, even for "streaming" scenarios
+        // direct streaming via 'stream: true' has shown inconsistent results (returning JSON instead of binary).
         const payload: any = {
             text: text,
             model: model_id || "speech-2.6-turb",
@@ -57,44 +59,35 @@ export const onRequestPost = async (context: any) => {
                 format: "mp3",
                 channel: 1
             },
-            language_boost: "auto"
+            language_boost: "auto",
+            output_format: "url", // Force URL generation
+            stream: false
         };
 
-        if (stream) {
-            payload.stream = true;
-            response = await fetch(auraUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${env.AURA_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-        } else {
-            // Legacy/Cache mode: Get URL first
-            payload.output_format = "url";
-            payload.stream = false;
+        const initRes = await fetch(auraUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${env.AURA_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
 
-            const initRes = await fetch(auraUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${env.AURA_API_KEY}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            if (!initRes.ok) {
-                const errText = await initRes.text();
-                return Response.json({ error: `Aura Error (${initRes.status}): ${errText}` }, { status: initRes.status });
-            }
-
-            const json: any = await initRes.json();
-            if (!json.audio || !json.audio.startsWith('http')) {
-                 return Response.json({ error: "Aura generation succeeded but returned invalid URL" }, { status: 500 });
-            }
-            response = await fetch(json.audio);
+        if (!initRes.ok) {
+            const errText = await initRes.text();
+            return Response.json({ error: `Aura Error (${initRes.status}): ${errText}` }, { status: initRes.status });
         }
+
+        const json: any = await initRes.json();
+        
+        if (!json.audio || !json.audio.startsWith('http')) {
+             console.error("Aura Unexpected Response:", json);
+             return Response.json({ error: `Aura success but invalid audio URL. Response: ${JSON.stringify(json)}` }, { status: 500 });
+        }
+
+        // Fetch the actual audio stream from the returned URL
+        // This makes it compatible with our streaming response logic below
+        response = await fetch(json.audio);
 
     } else {
         // Default: ElevenLabs
@@ -122,6 +115,8 @@ export const onRequestPost = async (context: any) => {
     }
 
     // CRITICAL FIX: Check status AND Content-Type
+    // Upstream might return 200 but with JSON body if something logical failed (e.g. Aura status:ok but no audio?)
+    // Or normally 4xx/5xx for errors.
     const cType = response.headers.get('content-type') || '';
     
     if (!response.ok || cType.includes('application/json')) {
@@ -136,6 +131,7 @@ export const onRequestPost = async (context: any) => {
 
     if (stream) {
       // Pass-through stream to client
+      // Note: For Aura, this is streaming the data fetched from the temporary URL
       return new Response(response.body, {
         headers: { 'Content-Type': 'audio/mpeg' }
       });
