@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio, History, Clock, PlayCircle, CloudCheck } from 'lucide-react';
@@ -41,7 +40,7 @@ interface HistoryItem {
     audioUrl: string;
     timestamp: number;
     provider: TtsProvider;
-    isCloud?: boolean;
+    isCloud?: boolean; // True if saved to R2
 }
 
 const STORAGE_KEY_VOICES = 'custom_voices';
@@ -74,12 +73,10 @@ const VoiceStudio: React.FC = () => {
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
   const [modelId, setModelId] = useState('');
   
-  // Statistics State
+  // Statistics & History State
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
-  const [chartPeriod, setChartPeriod] = useState<number>(7);
-  
-  // History State
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [chartPeriod, setChartPeriod] = useState<number>(7);
   const [showHistory, setShowHistory] = useState(true);
   
   // Project Context
@@ -254,6 +251,44 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
+  // --- History Logic ---
+  const addToHistory = async (blobUrl: string, txt: string, isCloud = false) => {
+      const newItem: HistoryItem = {
+          id: crypto.randomUUID(),
+          text: txt.substring(0, 100) + (txt.length > 100 ? '...' : ''),
+          audioUrl: blobUrl,
+          timestamp: Date.now(),
+          provider,
+          isCloud
+      };
+      // Keep only last 10
+      const updatedList = [newItem, ...historyItems].slice(0, 10);
+      await persistHistory(updatedList);
+      return newItem.id;
+  };
+
+  const updateHistoryItemUrl = async (id: string, newUrl: string) => {
+      const updatedList = historyItems.map(item => 
+          item.id === id ? { ...item, audioUrl: newUrl, isCloud: true } : item
+      );
+      await persistHistory(updatedList);
+  };
+
+  const deleteHistoryItem = async (id: string) => {
+      if (!window.confirm("确定删除这条记录吗？")) return;
+      const updatedList = historyItems.filter(i => i.id !== id);
+      await persistHistory(updatedList);
+  };
+
+  const playHistoryItem = (item: HistoryItem) => {
+      setFinalAudioUrl(item.audioUrl);
+      if (audioRef.current) {
+          audioRef.current.src = item.audioUrl;
+          audioRef.current.play().catch(console.warn);
+      }
+  };
+
+  // --- Core API Logic ---
   const performSmartSplit = (ratio: number) => {
       if (!text) return;
       const targetLen = Math.floor(text.length * (ratio / 100));
@@ -295,43 +330,6 @@ const VoiceStudio: React.FC = () => {
       performSmartSplit(val);
   };
 
-  // --- History Management ---
-  const addToHistory = async (blobUrl: string, txt: string, isCloud = false) => {
-      const newItem: HistoryItem = {
-          id: crypto.randomUUID(),
-          text: txt.substring(0, 100) + (txt.length > 100 ? '...' : ''),
-          audioUrl: blobUrl,
-          timestamp: Date.now(),
-          provider,
-          isCloud
-      };
-      // Keep only last 10
-      const updatedList = [newItem, ...historyItems].slice(0, 10);
-      await persistHistory(updatedList);
-      return newItem.id;
-  };
-
-  const updateHistoryItemUrl = async (id: string, newUrl: string) => {
-      const updatedList = historyItems.map(item => 
-          item.id === id ? { ...item, audioUrl: newUrl, isCloud: true } : item
-      );
-      await persistHistory(updatedList);
-  };
-
-  const deleteHistoryItem = async (id: string) => {
-      if (!window.confirm("确定删除这条记录吗？")) return;
-      const updatedList = historyItems.filter(i => i.id !== id);
-      await persistHistory(updatedList);
-  };
-
-  const playHistoryItem = (item: HistoryItem) => {
-      setFinalAudioUrl(item.audioUrl);
-      if (audioRef.current) {
-          audioRef.current.src = item.audioUrl;
-          audioRef.current.play().catch(console.warn);
-      }
-  };
-
   const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
       const defaultId = provider === 'elevenlabs' ? DEFAULT_ELEVEN_VOICE : DEFAULT_AURA_VOICE;
       const effectiveVoiceId = customVoiceId.trim() || defaultId;
@@ -371,7 +369,7 @@ const VoiceStudio: React.FC = () => {
               chunks.push(value);
               receivedLength += value.length;
           }
-          if (receivedLength === 0) throw new Error("服务端返回了空数据流");
+          if (receivedLength === 0) throw new Error("服务端返回了空数据流 (或生成失败)");
           const blob = new Blob(chunks, { type: 'audio/mpeg' });
           addLog(`--> 数据接收完成: ${(receivedLength/1024).toFixed(1)} KB`);
           return URL.createObjectURL(blob);
@@ -382,7 +380,7 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Single Generate (Stream + Client Upload) ---
+  // --- Single Generate (Stream + History + Client Upload) ---
   const handleGenerateSingle = async () => {
       if (!text) {
           alert("请输入文本内容");
@@ -399,6 +397,7 @@ const VoiceStudio: React.FC = () => {
       try {
           addLog("--> 正在请求音频流...");
           const blobUrl = await callTtsApi(text, true); 
+          
           if (!blobUrl) throw new Error("API 返回了空数据");
 
           addLog("--> ✅ 流式生成成功，准备播放");
@@ -410,10 +409,10 @@ const VoiceStudio: React.FC = () => {
               audioRef.current.play().catch(console.warn);
           }
 
-          // 1. Immediately add to History (Ephemeral)
+          // 1. Add to History (Ephemeral Blob URL first)
           const historyId = await addToHistory(blobUrl, text, false);
           
-          // Background Pipeline: Convert Blob -> Upload -> Save Project -> Update History
+          // Background Pipeline: Convert Blob -> Upload -> Save Project & History
           (async () => {
               try {
                   await recordUsage(text.length);
@@ -427,7 +426,7 @@ const VoiceStudio: React.FC = () => {
                   const cloudUrl = await storage.uploadFile(file, targetProjectId);
                   addLog(`--> ✅ 上传成功!`);
                   
-                  // 2. Update History with Cloud URL (Persistent)
+                  // 2. Update History with Permanent URL
                   await updateHistoryItemUrl(historyId, cloudUrl);
 
                   if (projectId) {
@@ -781,7 +780,11 @@ const VoiceStudio: React.FC = () => {
                                       <PlayCircle className="w-3.5 h-3.5" /> 播放
                                   </button>
                                   <div className="flex items-center gap-1">
-                                      {item.isCloud && <CloudCheck className="w-3 h-3 text-emerald-400" title="已云端同步" />}
+                                      {item.isCloud && (
+                                        <div title="已云端同步">
+                                          <CloudCheck className="w-3 h-3 text-emerald-400" />
+                                        </div>
+                                      )}
                                       <button 
                                           onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }}
                                           className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"

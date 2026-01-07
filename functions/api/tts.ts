@@ -23,6 +23,8 @@ export const onRequestPost = async (context: any) => {
     const filename = `tts/${provider}_${hashHex}.mp3`;
 
     // 2. Check Cache (Cost Optimization) - Only for non-streaming requests
+    // Streaming usually implies immediate playback need, but we could cache it too. 
+    // For simplicity, we skip cache check on stream=true to ensure low latency start.
     if (!stream && env.BUCKET) {
         const cachedObject = await env.BUCKET.get(filename);
         if (cachedObject) {
@@ -41,13 +43,10 @@ export const onRequestPost = async (context: any) => {
             return Response.json({ error: "Server Configuration Error: Missing AURA_API_KEY" }, { status: 500 });
         }
 
-        // AuraSTD API Endpoint
         const auraUrl = `https://tts.aurastd.com/api/v1/tts`;
-        
-        // AuraSTD Payload Structure
         const payload: any = {
             text: text,
-            model: model_id || "speech-2.6-turb", // Default to Turbo model
+            model: model_id || "speech-2.6-turb",
             voice_setting: {
                 voice_id: voice_id,
                 speed: 1,
@@ -64,10 +63,7 @@ export const onRequestPost = async (context: any) => {
         };
 
         if (stream) {
-            // Streaming mode: Request direct audio bytes
             payload.stream = true;
-            // payload.output_format = "mp3"; // Optional, depending on API defaults
-            
             response = await fetch(auraUrl, {
                 method: 'POST',
                 headers: {
@@ -96,13 +92,9 @@ export const onRequestPost = async (context: any) => {
             }
 
             const json: any = await initRes.json();
-            
             if (!json.audio || !json.audio.startsWith('http')) {
-                 console.error("Aura Response:", json);
                  return Response.json({ error: "Aura generation succeeded but returned invalid URL" }, { status: 500 });
             }
-
-            // Fetch the actual audio stream from the returned URL
             response = await fetch(json.audio);
         }
 
@@ -113,7 +105,6 @@ export const onRequestPost = async (context: any) => {
         }
 
         const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${voice_id}${stream ? '/stream' : ''}`;
-        
         response = await fetch(elevenLabsUrl, {
           method: 'POST',
           headers: {
@@ -132,12 +123,18 @@ export const onRequestPost = async (context: any) => {
         });
     }
 
-    // Critical: Check upstream response status before streaming
-    // If upstream failed (e.g. 400/500), it sends JSON, not audio. 
-    // We must intercept this to prevent the client from playing "error json bytes" as silent audio.
+    // CRITICAL FIX: Check response status before streaming.
+    // If upstream returns 400/500, it sends a JSON error body, NOT audio bytes.
+    // If we just stream it, the browser treats it as a corrupt audio file (silent failure).
     if (!response.ok) {
       const errText = await response.text();
-      return Response.json({ error: `${provider} Error (${response.status}): ${errText.substring(0, 500)}` }, { status: response.status });
+      // Try to parse JSON error if possible for cleaner message
+      try {
+          const errJson = JSON.parse(errText);
+          return Response.json({ error: `${provider} API Error: ${errJson.detail?.message || errJson.message || JSON.stringify(errJson)}` }, { status: response.status });
+      } catch {
+          return Response.json({ error: `${provider} API Error (${response.status}): ${errText.substring(0, 200)}` }, { status: response.status });
+      }
     }
 
     if (stream) {
