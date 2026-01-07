@@ -213,6 +213,7 @@ const VoiceStudio: React.FC = () => {
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       // If voice has a provider and it differs from current, switch provider
+      // Note: With the new filtering, this case is less likely unless invoked programmatically
       if (voice.provider && voice.provider !== provider) {
           setProvider(voice.provider);
       }
@@ -617,6 +618,15 @@ const VoiceStudio: React.FC = () => {
       return { labels, data, maxVal };
   }, [usageLogs, chartPeriod]);
 
+  // Filter saved voices based on current provider
+  const filteredSavedVoices = useMemo(() => {
+      return savedVoices.filter(voice => {
+          // Backward compatibility: undefined provider treated as 'elevenlabs'
+          const voiceProvider = voice.provider || 'elevenlabs'; 
+          return voiceProvider === provider;
+      });
+  }, [savedVoices, provider]);
+
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
       {/* Sidebar */}
@@ -707,12 +717,12 @@ const VoiceStudio: React.FC = () => {
              )}
           </div>
 
-          {/* Saved Voices */}
-          {savedVoices.length > 0 && (
+          {/* Saved Voices (Filtered) */}
+          {filteredSavedVoices.length > 0 && (
               <div className="shrink-0">
-                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1"><Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏</label>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1"><Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏 ({provider === 'elevenlabs' ? 'Eleven' : 'Aura'})</label>
                 <div className="space-y-2">
-                    {savedVoices.map(voice => (
+                    {filteredSavedVoices.map(voice => (
                         <div key={voice.id} onClick={() => handleSelectSavedVoice(voice)} className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}>
                             <div className="flex items-center gap-3 overflow-hidden">
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
