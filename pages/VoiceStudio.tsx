@@ -106,13 +106,12 @@ const VoiceStudio: React.FC = () => {
       }
   }, [consoleLogs]);
 
-  // Set default model when provider changes
+  // Set default model when provider changes (removed auto-clear of voice ID to support persistence)
   useEffect(() => {
       if (TTS_MODELS[provider] && TTS_MODELS[provider].length > 0) {
+          // Reset model to default for the provider
           setModelId(TTS_MODELS[provider][0].id);
       }
-      setCustomVoiceId(''); 
-      setCustomVoiceName('');
   }, [provider]);
 
   // Restore User Preference & Load Data
@@ -206,8 +205,27 @@ const VoiceStudio: React.FC = () => {
       storage.uploadToolData(STORAGE_KEY_STATS, payload).catch(console.error);
   };
 
-  const saveUserPref = (type: 'custom', id: string, name?: string) => {
-      localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name, provider }));
+  const saveUserPref = (type: 'custom', id: string, name?: string, currentProvider: TtsProvider = provider) => {
+      localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name, provider: currentProvider }));
+  };
+
+  const handleProviderChange = (newProvider: TtsProvider) => {
+      if (newProvider === provider) return;
+      setProvider(newProvider);
+      
+      // Auto-select first saved voice for the new provider
+      const providerVoices = savedVoices.filter(v => (v.provider || 'elevenlabs') === newProvider);
+      
+      if (providerVoices.length > 0) {
+          const defaultVoice = providerVoices[0];
+          setCustomVoiceId(defaultVoice.id);
+          setCustomVoiceName(defaultVoice.name);
+          saveUserPref('custom', defaultVoice.id, defaultVoice.name, newProvider);
+      } else {
+          setCustomVoiceId('');
+          setCustomVoiceName('');
+          saveUserPref('custom', '', '', newProvider);
+      }
   };
 
   const handleSaveVoice = async () => {
@@ -241,7 +259,7 @@ const VoiceStudio: React.FC = () => {
       }
       setCustomVoiceId(voice.id);
       setCustomVoiceName(voice.name);
-      saveUserPref('custom', voice.id, voice.name);
+      saveUserPref('custom', voice.id, voice.name, voice.provider || provider);
   };
 
   const handleCustomIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -603,8 +621,8 @@ const VoiceStudio: React.FC = () => {
                 <Radio className="w-3.5 h-3.5" /> 渠道渠道
              </label>
              <div className="flex bg-slate-100 p-1 rounded-xl">
-                 <button onClick={() => setProvider('elevenlabs')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'elevenlabs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>ElevenLabs</button>
-                 <button onClick={() => setProvider('aura')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'aura' ? 'bg-white text-fuchsia-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Aura</button>
+                 <button onClick={() => handleProviderChange('elevenlabs')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'elevenlabs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>ElevenLabs</button>
+                 <button onClick={() => handleProviderChange('aura')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'aura' ? 'bg-white text-fuchsia-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Aura</button>
              </div>
           </div>
 
