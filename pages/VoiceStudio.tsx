@@ -1,20 +1,32 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio } from 'lucide-react';
 import * as storage from '../services/storageService';
 
-// Default fallback voice if no custom ID is provided (Rachel)
-const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
+// Default fallback voices
+const DEFAULT_ELEVEN_VOICE = '21m00Tcm4TlvDq8ikWAM'; // Rachel
+const DEFAULT_AURA_VOICE = 'aura-zeus-en'; // Placeholder default for Aura
 
-const TTS_MODELS = [
-  { id: 'eleven_v3', name: 'Eleven v3' },
-];
+type TtsProvider = 'elevenlabs' | 'aura';
+
+const TTS_MODELS: Record<TtsProvider, { id: string; name: string }[]> = {
+  elevenlabs: [
+    { id: 'eleven_v3', name: 'Eleven v3 (Default)' },
+    { id: 'eleven_multilingual_v2', name: 'Multilingual v2' },
+    { id: 'eleven_turbo_v2', name: 'Turbo v2 (Fast)' },
+  ],
+  aura: [
+    { id: 'aura-1', name: 'Aura 1 (Standard)' },
+    { id: 'aura-2', name: 'Aura 2 (Pro)' },
+  ]
+};
 
 interface CustomVoice {
     id: string;
     name: string;
     createdAt: number;
+    provider?: TtsProvider; // Added provider field
 }
 
 interface UsageLog {
@@ -45,10 +57,11 @@ const VoiceStudio: React.FC = () => {
   const [finalAudioUrl, setFinalAudioUrl] = useState<string | null>(null);
 
   // Voice State
+  const [provider, setProvider] = useState<TtsProvider>('elevenlabs');
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [customVoiceName, setCustomVoiceName] = useState('');
   const [savedVoices, setSavedVoices] = useState<CustomVoice[]>([]);
-  const [modelId, setModelId] = useState(TTS_MODELS[0].id);
+  const [modelId, setModelId] = useState('');
   
   // Statistics State
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
@@ -80,15 +93,26 @@ const VoiceStudio: React.FC = () => {
       }
   }, [consoleLogs]);
 
+  // Set default model when provider changes
+  useEffect(() => {
+      if (TTS_MODELS[provider] && TTS_MODELS[provider].length > 0) {
+          setModelId(TTS_MODELS[provider][0].id);
+      }
+      // Reset voice ID when switching provider if it looks like a default or mismatch
+      setCustomVoiceId(''); 
+      setCustomVoiceName('');
+  }, [provider]);
+
   // Restore User Preference & Load Data
   useEffect(() => {
     const pref = localStorage.getItem('lva_voice_pref');
     if (pref) {
         try {
-            const { type, id, name } = JSON.parse(pref);
-            if (type === 'custom') {
-                setCustomVoiceId(id);
-                setCustomVoiceName(name || '');
+            const parsed = JSON.parse(pref);
+            if (parsed.type === 'custom') {
+                if (parsed.provider) setProvider(parsed.provider); // Restore provider
+                setCustomVoiceId(parsed.id);
+                setCustomVoiceName(parsed.name || '');
             }
         } catch (e) {
             console.error("Failed to parse voice preference", e);
@@ -158,7 +182,7 @@ const VoiceStudio: React.FC = () => {
   };
 
   const saveUserPref = (type: 'custom', id: string, name?: string) => {
-      localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name }));
+      localStorage.setItem('lva_voice_pref', JSON.stringify({ type, id, name, provider }));
   };
 
   const handleSaveVoice = async () => {
@@ -167,10 +191,11 @@ const VoiceStudio: React.FC = () => {
       const name = customVoiceName.trim();
       const existingIndex = savedVoices.findIndex(v => v.id === id);
       let updatedList = [...savedVoices];
+      // Save provider info with voice
       if (existingIndex > -1) {
-          updatedList[existingIndex] = { ...updatedList[existingIndex], name: name };
+          updatedList[existingIndex] = { ...updatedList[existingIndex], name: name, provider };
       } else {
-          updatedList = [{ id, name, createdAt: Date.now() }, ...savedVoices];
+          updatedList = [{ id, name, createdAt: Date.now(), provider }, ...savedVoices];
       }
       await persistVoices(updatedList);
       saveUserPref('custom', id, name);
@@ -187,6 +212,10 @@ const VoiceStudio: React.FC = () => {
   };
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
+      // If voice has a provider and it differs from current, switch provider
+      if (voice.provider && voice.provider !== provider) {
+          setProvider(voice.provider);
+      }
       setCustomVoiceId(voice.id);
       setCustomVoiceName(voice.name);
       saveUserPref('custom', voice.id, voice.name);
@@ -212,14 +241,10 @@ const VoiceStudio: React.FC = () => {
       let splitIndex = targetLen;
       let found = false;
       
-      // Search range (scan outwards)
-      // We limit the search to avoid scanning the entire text if not needed, 
-      // but here we scan until we find one or hit ends for safety.
       for (let offset = 0; offset < text.length; offset++) {
           const right = targetLen + offset;
           const left = targetLen - offset;
           
-          // Check right first (often natural reading flow prefers finishing the thought slightly later)
           if (right < text.length && delimiters.includes(text[right])) {
               splitIndex = right + 1; // Include the delimiter in the first part
               found = true;
@@ -230,11 +255,9 @@ const VoiceStudio: React.FC = () => {
               found = true;
               break;
           }
-          // Optimization: if we've gone too far (e.g. 2000 chars) without finding a delimiter, maybe just break hard?
-          // For now, let's keep searching to guarantee sentence integrity.
       }
       
-      if (!found) splitIndex = targetLen; // Fallback if no delimiters exist
+      if (!found) splitIndex = targetLen;
 
       setTextPart1(text.substring(0, splitIndex));
       setTextPart2(text.substring(splitIndex));
@@ -247,7 +270,6 @@ const VoiceStudio: React.FC = () => {
           return;
       }
       
-      // Default to 50% split
       setSplitRatio(50);
       performSmartSplit(50);
       
@@ -263,7 +285,10 @@ const VoiceStudio: React.FC = () => {
   };
 
   const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
-      const effectiveVoiceId = customVoiceId.trim() || DEFAULT_VOICE_ID;
+      // Determine default ID based on provider
+      const defaultId = provider === 'elevenlabs' ? DEFAULT_ELEVEN_VOICE : DEFAULT_AURA_VOICE;
+      const effectiveVoiceId = customVoiceId.trim() || defaultId;
+      
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -271,18 +296,17 @@ const VoiceStudio: React.FC = () => {
           text: txt,
           voice_id: effectiveVoiceId,
           model_id: modelId,
-          stream: streamMode
+          stream: streamMode,
+          provider: provider // Send provider to backend
         })
       });
 
       if (!response.ok) {
-          // Robust error handling: Check content type to distinguish JSON vs HTML errors (Cloudflare 500s)
           const contentType = response.headers.get("content-type");
           if (contentType && contentType.includes("application/json")) {
               const err = await response.json();
               throw new Error(err.error || 'Generation failed');
           } else {
-              // Usually HTML error page from Cloudflare or Worker crash
               const text = await response.text();
               console.error("API Non-JSON Error:", text.substring(0, 200));
               throw new Error(`服务繁忙或超时 (${response.status})。请尝试拆分文本或稍后重试。`);
@@ -290,7 +314,6 @@ const VoiceStudio: React.FC = () => {
       }
 
       if (streamMode) {
-          // Robust stream reading
           const reader = response.body?.getReader();
           if (!reader) throw new Error("浏览器不支持流式读取");
           
@@ -367,11 +390,11 @@ const VoiceStudio: React.FC = () => {
       setFinalAudioUrl(null);
       setIsSavedToProject(false);
       
-      addLog("🚀 开始并行生成两段语音...");
+      addLog(`🚀 开始并行生成两段语音 (${provider === 'elevenlabs' ? 'ElevenLabs' : 'Aura'})...`);
 
       try {
           const [res1, res2] = await Promise.all([
-              callTtsApi(textPart1, false), // Dual mode uses standard generation (server cache)
+              callTtsApi(textPart1, false), 
               callTtsApi(textPart2, false)
           ]);
 
@@ -422,7 +445,7 @@ const VoiceStudio: React.FC = () => {
       setIsSavedToProject(false);
       setFinalAudioUrl(null); 
 
-      addLog("🚀 开始生成任务...");
+      addLog(`🚀 开始生成任务 (${provider === 'elevenlabs' ? 'ElevenLabs' : 'Aura'})...`);
 
       try {
           // Use stream: true to prevent Server-Side OOM/Timeout on large text
@@ -603,10 +626,32 @@ const VoiceStudio: React.FC = () => {
             <Mic className="w-6 h-6 text-violet-600" />
             语音工坊
           </h1>
-          <p className="text-xs text-slate-500 font-medium">ElevenLabs 驱动的高品质 TTS</p>
+          <p className="text-xs text-slate-500 font-medium">ElevenLabs & Aura 驱动的高品质 TTS</p>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar flex flex-col">
+          
+          {/* Provider Selection */}
+          <div className="shrink-0">
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
+                <Radio className="w-3.5 h-3.5" /> 渠道渠道
+             </label>
+             <div className="flex bg-slate-100 p-1 rounded-xl">
+                 <button 
+                    onClick={() => setProvider('elevenlabs')} 
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'elevenlabs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 >
+                    ElevenLabs
+                 </button>
+                 <button 
+                    onClick={() => setProvider('aura')} 
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'aura' ? 'bg-white text-fuchsia-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                 >
+                    Aura
+                 </button>
+             </div>
+          </div>
+
           {/* Model Selection */}
           <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
@@ -617,7 +662,7 @@ const VoiceStudio: React.FC = () => {
                 onChange={(e) => setModelId(e.target.value)}
                 className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer text-slate-700"
              >
-                {TTS_MODELS.map(m => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                {(TTS_MODELS[provider] || []).map(m => (<option key={m.id} value={m.id}>{m.name}</option>))}
              </select>
           </div>
 
@@ -632,7 +677,7 @@ const VoiceStudio: React.FC = () => {
                     type="text"
                     value={customVoiceId}
                     onChange={handleCustomIdChange}
-                    placeholder="粘贴 ElevenLabs Voice ID..."
+                    placeholder={provider === 'elevenlabs' ? "粘贴 ElevenLabs Voice ID..." : "粘贴 Aura Voice ID..."}
                     className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
                  />
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
@@ -670,8 +715,13 @@ const VoiceStudio: React.FC = () => {
                     {savedVoices.map(voice => (
                         <div key={voice.id} onClick={() => handleSelectSavedVoice(voice)} className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}>
                             <div className="flex items-center gap-3 overflow-hidden">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>{voice.name[0]}</div>
-                                <div className="min-w-0 flex-1"><div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div></div>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
+                                    {voice.name[0]}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
+                                    <div className="text-[9px] text-slate-400 uppercase tracking-wider">{voice.provider || 'elevenlabs'}</div>
+                                </div>
                             </div>
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }} className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
