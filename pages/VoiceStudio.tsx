@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio } from 'lucide-react';
+import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio, History, Clock, PlayCircle, CloudCheck } from 'lucide-react';
 import * as storage from '../services/storageService';
 
 // Default fallback voices
@@ -26,23 +26,33 @@ interface CustomVoice {
     id: string;
     name: string;
     createdAt: number;
-    provider?: TtsProvider; // Added provider field
+    provider?: TtsProvider;
 }
 
 interface UsageLog {
     timestamp: number;
     charCount: number;
-    provider?: TtsProvider; // Added provider field to logs
+    provider?: TtsProvider;
+}
+
+interface HistoryItem {
+    id: string;
+    text: string;
+    audioUrl: string;
+    timestamp: number;
+    provider: TtsProvider;
+    isCloud?: boolean;
 }
 
 const STORAGE_KEY_VOICES = 'custom_voices';
 const STORAGE_KEY_STATS = 'voice_usage_stats';
+const STORAGE_KEY_HISTORY = 'voice_gen_history';
 
 const VoiceStudio: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   
-  // Workflow State: 1=Input/Split, 2=Generate, 3=Merge
+  // Workflow State
   const [step, setStep] = useState(1);
   const [isSplitMode, setIsSplitMode] = useState(false);
   const [splitRatio, setSplitRatio] = useState(50);
@@ -66,7 +76,11 @@ const VoiceStudio: React.FC = () => {
   
   // Statistics State
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
-  const [chartPeriod, setChartPeriod] = useState<number>(7); // Days
+  const [chartPeriod, setChartPeriod] = useState<number>(7);
+  
+  // History State
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(true);
   
   // Project Context
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -99,7 +113,6 @@ const VoiceStudio: React.FC = () => {
       if (TTS_MODELS[provider] && TTS_MODELS[provider].length > 0) {
           setModelId(TTS_MODELS[provider][0].id);
       }
-      // Reset voice ID when switching provider if it looks like a default or mismatch
       setCustomVoiceId(''); 
       setCustomVoiceName('');
   }, [provider]);
@@ -111,7 +124,7 @@ const VoiceStudio: React.FC = () => {
         try {
             const parsed = JSON.parse(pref);
             if (parsed.type === 'custom') {
-                if (parsed.provider) setProvider(parsed.provider); // Restore provider
+                if (parsed.provider) setProvider(parsed.provider); 
                 setCustomVoiceId(parsed.id);
                 setCustomVoiceName(parsed.name || '');
             }
@@ -134,7 +147,6 @@ const VoiceStudio: React.FC = () => {
     }
   }, [location]);
 
-  // Check text length on change to suggest splitting
   useEffect(() => {
       const limit = provider === 'aura' ? 1000 : 2500;
       if (text.length > limit && !isSplitMode && step === 1) {
@@ -161,6 +173,12 @@ const VoiceStudio: React.FC = () => {
           if (statsData && Array.isArray(statsData.logs)) {
               setUsageLogs(statsData.logs);
           }
+
+          // Load History
+          const historyData = await storage.getToolData<{ items: HistoryItem[] }>(STORAGE_KEY_HISTORY);
+          if (historyData && Array.isArray(historyData.items)) {
+              setHistoryItems(historyData.items);
+          }
       } catch (e) {
           console.error("Failed to load data", e);
       }
@@ -171,6 +189,13 @@ const VoiceStudio: React.FC = () => {
       const payload = { voices };
       await storage.saveToolData(STORAGE_KEY_VOICES, payload);
       storage.uploadToolData(STORAGE_KEY_VOICES, payload).catch(console.error);
+  };
+
+  const persistHistory = async (items: HistoryItem[]) => {
+      setHistoryItems(items);
+      const payload = { items };
+      await storage.saveToolData(STORAGE_KEY_HISTORY, payload);
+      storage.uploadToolData(STORAGE_KEY_HISTORY, payload).catch(console.error);
   };
 
   const recordUsage = async (charCount: number) => {
@@ -193,7 +218,6 @@ const VoiceStudio: React.FC = () => {
       const name = customVoiceName.trim();
       const existingIndex = savedVoices.findIndex(v => v.id === id);
       let updatedList = [...savedVoices];
-      // Save provider info with voice
       if (existingIndex > -1) {
           updatedList[existingIndex] = { ...updatedList[existingIndex], name: name, provider };
       } else {
@@ -214,7 +238,6 @@ const VoiceStudio: React.FC = () => {
   };
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
-      // If voice has a provider and it differs from current, switch provider
       if (voice.provider && voice.provider !== provider) {
           setProvider(voice.provider);
       }
@@ -231,36 +254,23 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Smart Split Logic ---
   const performSmartSplit = (ratio: number) => {
       if (!text) return;
-      
       const targetLen = Math.floor(text.length * (ratio / 100));
-      // Prioritize delimiters to ensure we don't break mid-sentence
       const delimiters = ['\n', '。', '！', '？', '.', '!', '?'];
-      
-      // Search outwards from targetLen for nearest delimiter
       let splitIndex = targetLen;
       let found = false;
-      
       for (let offset = 0; offset < text.length; offset++) {
           const right = targetLen + offset;
           const left = targetLen - offset;
-          
           if (right < text.length && delimiters.includes(text[right])) {
-              splitIndex = right + 1; // Include the delimiter in the first part
-              found = true;
-              break;
+              splitIndex = right + 1; found = true; break;
           }
           if (left >= 0 && delimiters.includes(text[left])) {
-              splitIndex = left + 1;
-              found = true;
-              break;
+              splitIndex = left + 1; found = true; break;
           }
       }
-      
       if (!found) splitIndex = targetLen;
-
       setTextPart1(text.substring(0, splitIndex));
       setTextPart2(text.substring(splitIndex));
   };
@@ -272,10 +282,8 @@ const VoiceStudio: React.FC = () => {
           alert(`当前渠道建议在文本超过 ${limit} 字符时使用拆分功能。您的文本较短，直接生成即可。`);
           return;
       }
-      
       setSplitRatio(50);
       performSmartSplit(50);
-      
       setIsSplitMode(true);
       setStep(2);
       addLog(`文本已进入拆分模式`);
@@ -287,8 +295,44 @@ const VoiceStudio: React.FC = () => {
       performSmartSplit(val);
   };
 
+  // --- History Management ---
+  const addToHistory = async (blobUrl: string, txt: string, isCloud = false) => {
+      const newItem: HistoryItem = {
+          id: crypto.randomUUID(),
+          text: txt.substring(0, 100) + (txt.length > 100 ? '...' : ''),
+          audioUrl: blobUrl,
+          timestamp: Date.now(),
+          provider,
+          isCloud
+      };
+      // Keep only last 10
+      const updatedList = [newItem, ...historyItems].slice(0, 10);
+      await persistHistory(updatedList);
+      return newItem.id;
+  };
+
+  const updateHistoryItemUrl = async (id: string, newUrl: string) => {
+      const updatedList = historyItems.map(item => 
+          item.id === id ? { ...item, audioUrl: newUrl, isCloud: true } : item
+      );
+      await persistHistory(updatedList);
+  };
+
+  const deleteHistoryItem = async (id: string) => {
+      if (!window.confirm("确定删除这条记录吗？")) return;
+      const updatedList = historyItems.filter(i => i.id !== id);
+      await persistHistory(updatedList);
+  };
+
+  const playHistoryItem = (item: HistoryItem) => {
+      setFinalAudioUrl(item.audioUrl);
+      if (audioRef.current) {
+          audioRef.current.src = item.audioUrl;
+          audioRef.current.play().catch(console.warn);
+      }
+  };
+
   const callTtsApi = async (txt: string, streamMode: boolean): Promise<string> => {
-      // Determine default ID based on provider
       const defaultId = provider === 'elevenlabs' ? DEFAULT_ELEVEN_VOICE : DEFAULT_AURA_VOICE;
       const effectiveVoiceId = customVoiceId.trim() || defaultId;
       
@@ -300,7 +344,7 @@ const VoiceStudio: React.FC = () => {
           voice_id: effectiveVoiceId,
           model_id: modelId,
           stream: streamMode,
-          provider: provider // Send provider to backend
+          provider: provider
         })
       });
 
@@ -319,19 +363,15 @@ const VoiceStudio: React.FC = () => {
       if (streamMode) {
           const reader = response.body?.getReader();
           if (!reader) throw new Error("浏览器不支持流式读取");
-          
           const chunks: Uint8Array[] = [];
           let receivedLength = 0;
-          
           while(true) {
               const {done, value} = await reader.read();
               if (done) break;
               chunks.push(value);
               receivedLength += value.length;
           }
-          
           if (receivedLength === 0) throw new Error("服务端返回了空数据流");
-          
           const blob = new Blob(chunks, { type: 'audio/mpeg' });
           addLog(`--> 数据接收完成: ${(receivedLength/1024).toFixed(1)} KB`);
           return URL.createObjectURL(blob);
@@ -339,6 +379,82 @@ const VoiceStudio: React.FC = () => {
           const data = await response.json();
           if (!data.url) throw new Error("API 返回了成功状态，但未包含有效的音频 URL");
           return data.url;
+      }
+  };
+
+  // --- Single Generate (Stream + Client Upload) ---
+  const handleGenerateSingle = async () => {
+      if (!text) {
+          alert("请输入文本内容");
+          return;
+      }
+
+      setLoading(true);
+      setErrorMsg(null);
+      setIsSavedToProject(false);
+      setFinalAudioUrl(null); 
+
+      addLog(`🚀 开始生成任务 (${provider === 'elevenlabs' ? 'ElevenLabs' : 'Aura'})...`);
+
+      try {
+          addLog("--> 正在请求音频流...");
+          const blobUrl = await callTtsApi(text, true); 
+          if (!blobUrl) throw new Error("API 返回了空数据");
+
+          addLog("--> ✅ 流式生成成功，准备播放");
+          setFinalAudioUrl(blobUrl);
+          setLoading(false); 
+          
+          if (audioRef.current) {
+              audioRef.current.src = blobUrl;
+              audioRef.current.play().catch(console.warn);
+          }
+
+          // 1. Immediately add to History (Ephemeral)
+          const historyId = await addToHistory(blobUrl, text, false);
+          
+          // Background Pipeline: Convert Blob -> Upload -> Save Project -> Update History
+          (async () => {
+              try {
+                  await recordUsage(text.length);
+                  
+                  addLog("--> 🔄 正在后台上传至云端...");
+                  const blob = await fetch(blobUrl).then(r => r.blob());
+                  const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+                  
+                  // Use a generic folder if no project ID
+                  const targetProjectId = projectId || 'temp_voice_history';
+                  const cloudUrl = await storage.uploadFile(file, targetProjectId);
+                  addLog(`--> ✅ 上传成功!`);
+                  
+                  // 2. Update History with Cloud URL (Persistent)
+                  await updateHistoryItemUrl(historyId, cloudUrl);
+
+                  if (projectId) {
+                      const project = await storage.getProject(projectId);
+                      if (project) {
+                          const updated = { 
+                              ...project, 
+                              audioFile: cloudUrl,
+                              moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
+                          };
+                          await storage.saveProject(updated);
+                          storage.uploadProjects().catch(console.error);
+                          setIsSavedToProject(true);
+                          addLog("--> 💾 项目已更新");
+                          setFinalAudioUrl(cloudUrl);
+                      }
+                  }
+              } catch (bgErr: any) {
+                  console.error("Background pipeline failed", bgErr);
+                  addLog(`⚠️ 后台上传失败: ${bgErr.message}`);
+              }
+          })();
+
+      } catch (e: any) {
+          setLoading(false);
+          setErrorMsg(e.message);
+          addLog(`❌ 生成失败: ${e.message}`);
       }
   };
 
@@ -362,28 +478,21 @@ const VoiceStudio: React.FC = () => {
     }
   };
 
-  // Core API Logic for Merging
+  // ... [Other Handlers like handleGenerateDual, handleMerge, handleSaveToProject remain same] ...
   const performMerge = async (u1: string, u2: string): Promise<string> => {
       const response = await fetch('/api/audio/merge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-              url1: u1, 
-              url2: u2, 
-              projectId: projectId 
-          })
+          body: JSON.stringify({ url1: u1, url2: u2, projectId: projectId })
       });
-
       if (!response.ok) {
           const err = await response.json();
           throw new Error(err.error || 'Merge failed');
       }
-
       const data = await response.json();
       return data.url;
   };
 
-  // --- Step 2: Generate Dual Audio (And Auto Merge/Save) ---
   const handleGenerateDual = async () => {
       if (!textPart1 || !textPart2) return;
       setLoading(true);
@@ -392,181 +501,54 @@ const VoiceStudio: React.FC = () => {
       setAudioUrl2(null);
       setFinalAudioUrl(null);
       setIsSavedToProject(false);
-      
       addLog(`🚀 开始并行生成两段语音 (${provider === 'elevenlabs' ? 'ElevenLabs' : 'Aura'})...`);
-
       try {
-          const [res1, res2] = await Promise.all([
-              callTtsApi(textPart1, false), 
-              callTtsApi(textPart2, false)
-          ]);
-
+          const [res1, res2] = await Promise.all([callTtsApi(textPart1, false), callTtsApi(textPart2, false)]);
           setAudioUrl1(res1);
           setAudioUrl2(res2);
-          
           recordUsage(textPart1.length + textPart2.length).catch(console.error);
-
           addLog("✅ 生成完毕，正在请求合并...");
           setStep(3); 
-
           const mergedUrl = await performMerge(res1, res2);
-          
           setFinalAudioUrl(mergedUrl);
-          
           if (audioRef.current) audioRef.current.src = mergedUrl;
           addLog("✅ 合并成功！");
-
           if (projectId) {
               addLog("💾 正在保存合并文件...");
-              try {
-                  await handleSaveToProject(mergedUrl);
-              } catch (saveErr: any) {
-                  console.error("Auto save failed", saveErr);
-                  addLog(`⚠️ 自动保存失败: ${saveErr.message}`);
-              }
-          } else {
-              addLog("ℹ️ 未关联项目，跳过保存");
-          }
-
-      } catch (e: any) {
-          setErrorMsg(e.message);
-          addLog(`❌ 流程失败: ${e.message}`);
-      } finally {
-          setLoading(false);
-      }
+              try { await handleSaveToProject(mergedUrl); } catch (saveErr: any) { console.error("Auto save failed", saveErr); addLog(`⚠️ 自动保存失败: ${saveErr.message}`); }
+          } else { addLog("ℹ️ 未关联项目，跳过保存"); }
+      } catch (e: any) { setErrorMsg(e.message); addLog(`❌ 流程失败: ${e.message}`); } finally { setLoading(false); }
   };
 
-  // --- Single Generate (Stream + Client Upload) ---
-  const handleGenerateSingle = async () => {
-      if (!text) {
-          alert("请输入文本内容");
-          return;
-      }
-
-      setLoading(true);
-      setErrorMsg(null);
-      setIsSavedToProject(false);
-      setFinalAudioUrl(null); 
-
-      addLog(`🚀 开始生成任务 (${provider === 'elevenlabs' ? 'ElevenLabs' : 'Aura'})...`);
-
-      try {
-          // Use stream: true to prevent Server-Side OOM/Timeout on large text
-          addLog("--> 正在请求音频流...");
-          const blobUrl = await callTtsApi(text, true); 
-          
-          if (!blobUrl) throw new Error("API 返回了空数据");
-
-          addLog("--> ✅ 流式生成成功，准备播放");
-
-          // Update UI IMMEDIATELY
-          setFinalAudioUrl(blobUrl);
-          setLoading(false); 
-          
-          if (audioRef.current) {
-              audioRef.current.src = blobUrl;
-              audioRef.current.play().catch(console.warn);
-          }
-          
-          // Background Pipeline: Convert Blob -> Upload -> Save Project
-          (async () => {
-              try {
-                  await recordUsage(text.length);
-                  
-                  if (!projectId) {
-                      addLog("--> ℹ️ 临时任务，未关联项目");
-                      return;
-                  }
-
-                  addLog("--> 🔄 正在后台上传至云端...");
-                  
-                  // Convert Blob URL back to Blob/File for upload
-                  const blob = await fetch(blobUrl).then(r => r.blob());
-                  const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
-                  
-                  // Client-side Upload to R2 (Robust for large files)
-                  const cloudUrl = await storage.uploadFile(file, projectId);
-                  addLog(`--> ✅ 上传成功!`);
-                  
-                  // Update Project Data
-                  const project = await storage.getProject(projectId);
-                  if (project) {
-                      const updated = { 
-                          ...project, 
-                          audioFile: cloudUrl,
-                          moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
-                      };
-                      await storage.saveProject(updated);
-                      storage.uploadProjects().catch(console.error);
-                      
-                      setIsSavedToProject(true);
-                      addLog("--> 💾 项目已更新");
-                      
-                      // Silently upgrade local blob URL to cloud URL
-                      setFinalAudioUrl(cloudUrl);
-                  }
-
-              } catch (bgErr: any) {
-                  console.error("Background pipeline failed", bgErr);
-                  addLog(`⚠️ 后台上传失败: ${bgErr.message}`);
-              }
-          })();
-
-      } catch (e: any) {
-          setLoading(false);
-          setErrorMsg(e.message);
-          addLog(`❌ 生成失败: ${e.message}`);
-      }
-  };
-
-  // --- Manual Merge Trigger (Backup) ---
   const handleMerge = async () => {
       if (!audioUrl1 || !audioUrl2) return;
       setLoading(true);
       setIsSavedToProject(false);
       addLog("🔧 手动请求合并...");
-
       try {
           const mergedUrl = await performMerge(audioUrl1, audioUrl2);
           setFinalAudioUrl(mergedUrl);
           if (audioRef.current) audioRef.current.src = mergedUrl;
           addLog("✅ 合并成功！");
-          
-          if (projectId) {
-              try {
-                  await handleSaveToProject(mergedUrl);
-              } catch (e: any) {
-                  addLog(`⚠️ 自动保存失败: ${e.message}`);
-              }
-          }
-      } catch (e: any) {
-          setErrorMsg(e.message);
-          addLog(`❌ 合并失败: ${e.message}`);
-      } finally {
-          setLoading(false);
-      }
+          if (projectId) { try { await handleSaveToProject(mergedUrl); } catch (e: any) { addLog(`⚠️ 自动保存失败: ${e.message}`); } }
+      } catch (e: any) { setErrorMsg(e.message); addLog(`❌ 合并失败: ${e.message}`); } finally { setLoading(false); }
   };
 
   const handleSaveToProject = async (urlOverride?: string) => {
       let targetUrl = urlOverride || finalAudioUrl;
-      
       if (!projectId) { console.warn("No Project ID"); return; }
       if (!targetUrl) { console.warn("No Audio URL"); return; }
-      
       setSavingToProject(true);
       try {
-          // If the audio is currently a local blob, we MUST upload it first
           if (targetUrl.startsWith('blob:')) {
               addLog("🔄 检测到本地临时音频，正在上传...");
               const blob = await fetch(targetUrl).then(r => r.blob());
               const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
-              
               const cloudUrl = await storage.uploadFile(file, projectId);
               addLog("✅ 上传成功！");
-              targetUrl = cloudUrl; // Use new cloud URL
-              setFinalAudioUrl(cloudUrl); // Update UI
+              targetUrl = cloudUrl; 
+              setFinalAudioUrl(cloudUrl); 
           }
-
           const project = await storage.getProject(projectId);
           if (project) {
                const updated = { 
@@ -579,66 +561,41 @@ const VoiceStudio: React.FC = () => {
                addLog(`✅ 项目音频已关联`);
                setIsSavedToProject(true);
           }
-      } catch(e: any) {
-          addLog(`❌ 保存失败: ${e.message}`);
-      } finally {
-          setSavingToProject(false);
-      }
+      } catch(e: any) { addLog(`❌ 保存失败: ${e.message}`); } finally { setSavingToProject(false); }
   };
 
-  const savedVoiceMatch = savedVoices.find(v => v.id === customVoiceId.trim());
-  const isCurrentIdSaved = !!savedVoiceMatch;
-
-  const downloadFileName = projectTitle 
-      ? `${projectTitle.replace(/[\\/:*?"<>|]/g, "_")}.mp3`
-      : `tts_${Date.now()}.mp3`;
+  const downloadFileName = projectTitle ? `${projectTitle.replace(/[\\/:*?"<>|]/g, "_")}.mp3` : `tts_${Date.now()}.mp3`;
 
   // --- Filter Logic ---
-  const filteredUsageLogs = useMemo(() => {
-      return usageLogs.filter(log => {
-          const p = log.provider || 'elevenlabs'; // Default fallback
-          return p === provider;
-      });
-  }, [usageLogs, provider]);
-
-  const filteredSavedVoices = useMemo(() => {
-      return savedVoices.filter(voice => {
-          const p = voice.provider || 'elevenlabs'; // Default fallback
-          return p === provider;
-      });
-  }, [savedVoices, provider]);
-
-  // --- Stats Calculation (Filtered) ---
+  const filteredUsageLogs = useMemo(() => usageLogs.filter(log => (log.provider || 'elevenlabs') === provider), [usageLogs, provider]);
+  const filteredSavedVoices = useMemo(() => savedVoices.filter(voice => (voice.provider || 'elevenlabs') === provider), [savedVoices, provider]);
   const totalCharsUsed = useMemo(() => filteredUsageLogs.reduce((acc, log) => acc + log.charCount, 0), [filteredUsageLogs]);
-  
   const chartData = useMemo(() => {
       const now = new Date();
-      const labels = [];
-      const data = [];
+      const labels = [], data = [];
       const dateMap = new Map<string, number>();
       for (let i = chartPeriod - 1; i >= 0; i--) {
-          const d = new Date(now);
-          d.setDate(d.getDate() - i);
+          const d = new Date(now); d.setDate(d.getDate() - i);
           const key = `${d.getMonth() + 1}/${d.getDate()}`;
-          dateMap.set(key, 0);
-          labels.push(key);
+          dateMap.set(key, 0); labels.push(key);
       }
       filteredUsageLogs.forEach(log => {
-          const d = new Date(log.timestamp);
-          const key = `${d.getMonth() + 1}/${d.getDate()}`;
-          if (dateMap.has(key)) {
-              dateMap.set(key, (dateMap.get(key) || 0) + log.charCount);
-          }
+          const d = new Date(log.timestamp); const key = `${d.getMonth() + 1}/${d.getDate()}`;
+          if (dateMap.has(key)) dateMap.set(key, (dateMap.get(key) || 0) + log.charCount);
       });
       labels.forEach(key => data.push(dateMap.get(key) || 0));
-      const maxVal = Math.max(...data, 1);
-      return { labels, data, maxVal };
+      return { labels, data, maxVal: Math.max(...data, 1) };
   }, [filteredUsageLogs, chartPeriod]);
+
+  // Determine if current custom ID is already saved
+  const isCurrentIdSaved = useMemo(() => {
+    return savedVoices.some(v => v.id === customVoiceId.trim());
+  }, [savedVoices, customVoiceId]);
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
-      {/* Sidebar */}
-      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-sm h-full">
+      {/* Left Sidebar */}
+      <div className="w-full md:w-80 bg-white border-r border-slate-200 flex flex-col z-20 shadow-sm h-full flex-shrink-0">
         <div className="p-6 pb-2">
           <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600 mb-2 flex items-center gap-2">
             <Mic className="w-6 h-6 text-violet-600" />
@@ -648,167 +605,71 @@ const VoiceStudio: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6 custom-scrollbar flex flex-col">
-          
           {/* Provider Selection */}
           <div className="shrink-0">
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
                 <Radio className="w-3.5 h-3.5" /> 渠道渠道
              </label>
              <div className="flex bg-slate-100 p-1 rounded-xl">
-                 <button 
-                    onClick={() => setProvider('elevenlabs')} 
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'elevenlabs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                 >
-                    ElevenLabs
-                 </button>
-                 <button 
-                    onClick={() => setProvider('aura')} 
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'aura' ? 'bg-white text-fuchsia-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                 >
-                    Aura
-                 </button>
+                 <button onClick={() => setProvider('elevenlabs')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'elevenlabs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>ElevenLabs</button>
+                 <button onClick={() => setProvider('aura')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${provider === 'aura' ? 'bg-white text-fuchsia-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>Aura</button>
              </div>
           </div>
 
           {/* Model Selection */}
           <div className="shrink-0">
-             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1">
-                <Cpu className="w-3.5 h-3.5" /> 语音模型
-             </label>
-             <select
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer text-slate-700"
-             >
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Cpu className="w-3.5 h-3.5" /> 语音模型</label>
+             <select value={modelId} onChange={(e) => setModelId(e.target.value)} className="w-full px-3 py-2.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-violet-300 cursor-pointer text-slate-700">
                 {(TTS_MODELS[provider] || []).map(m => (<option key={m.id} value={m.id}>{m.name}</option>))}
              </select>
           </div>
 
           {/* Custom Input */}
           <div className="shrink-0">
-             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
-                <span>自定义 Voice ID</span>
-                {customVoiceId && <span className="text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded font-bold">优先使用</span>}
-             </label>
+             <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between"><span>自定义 Voice ID</span>{customVoiceId && <span className="text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded font-bold">优先使用</span>}</label>
              <div className="relative mb-2">
-                 <input 
-                    type="text"
-                    value={customVoiceId}
-                    onChange={handleCustomIdChange}
-                    placeholder={provider === 'elevenlabs' ? "粘贴 ElevenLabs Voice ID..." : "粘贴 Aura Voice ID..."}
-                    className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`}
-                 />
+                 <input type="text" value={customVoiceId} onChange={handleCustomIdChange} placeholder={provider === 'elevenlabs' ? "粘贴 ElevenLabs Voice ID..." : "粘贴 Aura Voice ID..."} className={`w-full pl-9 pr-3 py-3 text-xs bg-slate-50 border rounded-xl outline-none transition-all font-mono text-slate-600 ${customVoiceId ? 'border-violet-300 ring-2 ring-violet-500/10 bg-white shadow-sm' : 'border-slate-200 focus:border-violet-300'}`} />
                  <Fingerprint className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${customVoiceId ? 'text-violet-500' : 'text-slate-400'}`} />
              </div>
              {customVoiceId && (
                  <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-1">
                      <div className="flex gap-2">
-                        <input 
-                            type="text"
-                            value={customVoiceName}
-                            onChange={(e) => setCustomVoiceName(e.target.value)}
-                            placeholder="给声音起个名..."
-                            className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300"
-                        />
-                        <button onClick={handleSaveVoice} disabled={!customVoiceName.trim()} className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap ${isCurrentIdSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-900 hover:bg-violet-600'}`}>
-                            {isCurrentIdSaved ? <RefreshCw className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-                            <span className="text-xs font-bold">{isCurrentIdSaved ? "更新" : "收藏"}</span>
-                        </button>
+                        <input type="text" value={customVoiceName} onChange={(e) => setCustomVoiceName(e.target.value)} placeholder="给声音起个名..." className="flex-1 px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg outline-none focus:border-violet-300" />
+                        <button onClick={handleSaveVoice} disabled={!customVoiceName.trim()} className={`px-3 py-2 text-white rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap ${isCurrentIdSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-slate-900 hover:bg-violet-600'}`}>{isCurrentIdSaved ? <RefreshCw className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}<span className="text-xs font-bold">{isCurrentIdSaved ? "更新" : "收藏"}</span></button>
                      </div>
-                     {isCurrentIdSaved && (
-                         <div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-100">
-                             <span className="text-[10px] text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500"/> 已存在</span>
-                             <button onClick={() => handleDeleteVoice(customVoiceId)} className="text-[10px] text-rose-500 hover:text-rose-700 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 删除</button>
-                         </div>
-                     )}
+                     {isCurrentIdSaved && (<div className="flex items-center justify-between px-2 py-1 bg-slate-50 rounded border border-slate-100"><span className="text-[10px] text-slate-400 flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-emerald-500"/> 已存在</span><button onClick={() => handleDeleteVoice(customVoiceId)} className="text-[10px] text-rose-500 hover:text-rose-700 flex items-center gap-1"><Trash2 className="w-3 h-3" /> 删除</button></div>)}
                  </div>
              )}
           </div>
 
-          {/* Saved Voices (Filtered) */}
+          {/* Saved Voices */}
           {filteredSavedVoices.length > 0 && (
               <div className="shrink-0">
                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block flex items-center gap-1"><Star className="w-3 h-3 fill-amber-400 text-amber-400" /> 我的收藏 ({provider === 'elevenlabs' ? 'Eleven' : 'Aura'})</label>
                 <div className="space-y-2">
                     {filteredSavedVoices.map(voice => (
                         <div key={voice.id} onClick={() => handleSelectSavedVoice(voice)} className={`group p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${customVoiceId === voice.id ? 'bg-violet-50 border-violet-200 shadow-sm' : 'bg-white border-slate-100 hover:border-violet-100 hover:bg-slate-50'}`}>
-                            <div className="flex items-center gap-3 overflow-hidden">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>
-                                    {voice.name[0]}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div>
-                                    <div className="text-[9px] text-slate-400 uppercase tracking-wider">{voice.provider || 'elevenlabs'}</div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }} className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                            </div>
+                            <div className="flex items-center gap-3 overflow-hidden"><div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${customVoiceId === voice.id ? 'bg-violet-500 text-white' : 'bg-amber-100 text-amber-600'}`}>{voice.name[0]}</div><div className="min-w-0 flex-1"><div className={`text-sm font-bold truncate ${customVoiceId === voice.id ? 'text-violet-700' : 'text-slate-700'}`}>{voice.name}</div><div className="text-[9px] text-slate-400 uppercase tracking-wider">{voice.provider || 'elevenlabs'}</div></div></div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => { e.stopPropagation(); handleDeleteVoice(voice.id); }} className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 className="w-3.5 h-3.5" /></button></div>
                         </div>
                     ))}
                 </div>
               </div>
           )}
 
-          {/* Stats Section */}
+          {/* Stats */}
           <div className="shrink-0 space-y-4 pt-4 border-t border-slate-100">
              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> 用量统计 ({provider === 'elevenlabs' ? 'Eleven' : 'Aura'})</label>
-             
-             {/* Total Table */}
              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                  <table className="w-full text-xs text-left">
-                     <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
-                         <tr>
-                             <th className="py-2 px-3 w-10 text-center">#</th>
-                             <th className="py-2 px-3">用户</th>
-                             <th className="py-2 px-3 text-right">已使用字符</th>
-                         </tr>
-                     </thead>
-                     <tbody className="text-slate-700">
-                         <tr>
-                             <td className="py-2 px-3 text-center border-r border-slate-50">1</td>
-                             <td className="py-2 px-3 border-r border-slate-50 font-bold">管理员</td>
-                             <td className="py-2 px-3 text-right font-mono font-bold text-violet-600">{totalCharsUsed.toLocaleString()}</td>
-                         </tr>
-                     </tbody>
+                     <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100"><tr><th className="py-2 px-3 w-10 text-center">#</th><th className="py-2 px-3">用户</th><th className="py-2 px-3 text-right">已使用字符</th></tr></thead>
+                     <tbody className="text-slate-700"><tr><td className="py-2 px-3 text-center border-r border-slate-50">1</td><td className="py-2 px-3 border-r border-slate-50 font-bold">管理员</td><td className="py-2 px-3 text-right font-mono font-bold text-violet-600">{totalCharsUsed.toLocaleString()}</td></tr></tbody>
                  </table>
              </div>
-
-             {/* Chart Controls */}
-             <div className="flex items-center justify-between">
-                 <span className="text-[10px] font-bold text-slate-400">每日趋势</span>
-                 <div className="flex bg-slate-100 p-0.5 rounded-lg">
-                     {[7, 14, 30].map(d => (
-                         <button 
-                            key={d} 
-                            onClick={() => setChartPeriod(d)}
-                            className={`text-[9px] px-2 py-0.5 rounded-md font-bold transition-all ${chartPeriod === d ? 'bg-white shadow text-violet-600' : 'text-slate-400 hover:text-slate-600'}`}
-                         >
-                             {d}天
-                         </button>
-                     ))}
-                 </div>
-             </div>
-
-             {/* CSS Bar Chart */}
+             <div className="flex items-center justify-between"><span className="text-[10px] font-bold text-slate-400">每日趋势</span><div className="flex bg-slate-100 p-0.5 rounded-lg">{[7, 14, 30].map(d => (<button key={d} onClick={() => setChartPeriod(d)} className={`text-[9px] px-2 py-0.5 rounded-md font-bold transition-all ${chartPeriod === d ? 'bg-white shadow text-violet-600' : 'text-slate-400 hover:text-slate-600'}`}>{d}天</button>))}</div></div>
              <div className="h-28 flex items-end gap-1 pt-4 pb-1 border-b border-slate-100 relative">
-                 {chartData.data.map((val, i) => (
-                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end">
-                         {/* Bar Label (Always Visible) */}
-                         <span className="text-[9px] text-slate-400 font-mono mb-0.5 opacity-100">{val > 0 ? val : ''}</span>
-                         {/* Bar */}
-                         <div 
-                            className="w-full bg-violet-200 hover:bg-violet-400 rounded-t-sm transition-all relative group-hover:shadow-md"
-                            style={{ height: `${(val / chartData.maxVal) * 100}%`, minHeight: val > 0 ? '4px' : '0' }}
-                         >
-                         </div>
-                         {/* Date Label */}
-                         <span className="text-[8px] font-medium text-slate-400 -rotate-45 origin-top-left translate-y-2 whitespace-nowrap absolute bottom-0 left-1/2">{chartData.labels[i]}</span>
-                     </div>
-                 ))}
-                 {chartData.data.every(v => v === 0) && (
-                     <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-300 italic">暂无数据</div>
-                 )}
+                 {chartData.data.map((val, i) => (<div key={i} className="flex-1 flex flex-col items-center gap-1 group relative h-full justify-end"><span className="text-[9px] text-slate-400 font-mono mb-0.5 opacity-100">{val > 0 ? val : ''}</span><div className="w-full bg-violet-200 hover:bg-violet-400 rounded-t-sm transition-all relative group-hover:shadow-md" style={{ height: `${(val / chartData.maxVal) * 100}%`, minHeight: val > 0 ? '4px' : '0' }}></div><span className="text-[8px] font-medium text-slate-400 -rotate-45 origin-top-left translate-y-2 whitespace-nowrap absolute bottom-0 left-1/2">{chartData.labels[i]}</span></div>))}
+                 {chartData.data.every(v => v === 0) && (<div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-300 italic">暂无数据</div>)}
              </div>
           </div>
           
@@ -817,9 +678,7 @@ const VoiceStudio: React.FC = () => {
              <label className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center gap-1"><Activity className="w-3.5 h-3.5" /> 生成进度日志</label>
              <div className="bg-slate-900 rounded-xl p-4 flex-1 border border-slate-800 shadow-inner flex flex-col">
                 <div ref={logsContainerRef} className="flex flex-col gap-2 font-mono text-[10px] leading-relaxed overflow-y-auto custom-scrollbar h-28 scroll-smooth">
-                    {consoleLogs.map((log, i) => (
-                        <div key={i} className={`break-all ${log.includes('❌') ? 'text-rose-400 font-bold' : log.includes('✅') ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{log}</div>
-                    ))}
+                    {consoleLogs.map((log, i) => (<div key={i} className={`break-all ${log.includes('❌') ? 'text-rose-400 font-bold' : log.includes('✅') ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{log}</div>))}
                     {errorMsg && <div className="text-rose-500 font-bold border-l-2 border-rose-500 pl-2">错误: {errorMsg}</div>}
                 </div>
              </div>
@@ -828,200 +687,114 @@ const VoiceStudio: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FC] relative">
         <div className="flex-1 p-4 md:p-8 overflow-y-auto">
            <div className="max-w-4xl mx-auto h-full flex flex-col gap-6">
-              
-              {/* Stepper / Controls for Split Flow */}
+              {/* Stepper */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
                   <div className="flex items-center gap-4">
                       {isSplitMode ? (
-                          <div className="flex items-center gap-2">
-                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 1 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>1. 拆分</span>
-                              <ArrowRight className="w-3 h-3 text-slate-300" />
-                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 2 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>2. 生成</span>
-                              <ArrowRight className="w-3 h-3 text-slate-300" />
-                              <span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 3 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>3. 合并</span>
-                          </div>
-                      ) : (
-                          <span className="text-sm font-bold text-slate-500">普通模式</span>
-                      )}
-                      
-                      {projectTitle && (
-                          <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                              <FolderOpen className="w-3.5 h-3.5 text-blue-500" />
-                              <span className="text-xs font-bold text-slate-600 max-w-[150px] truncate">{projectTitle}</span>
-                          </div>
-                      )}
+                          <div className="flex items-center gap-2"><span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 1 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>1. 拆分</span><ArrowRight className="w-3 h-3 text-slate-300" /><span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 2 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>2. 生成</span><ArrowRight className="w-3 h-3 text-slate-300" /><span className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold ${step === 3 ? 'bg-violet-100 text-violet-700' : 'text-slate-400'}`}>3. 合并</span></div>
+                      ) : (<span className="text-sm font-bold text-slate-500">普通模式</span>)}
+                      {projectTitle && (<div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg"><FolderOpen className="w-3.5 h-3.5 text-blue-500" /><span className="text-xs font-bold text-slate-600 max-w-[150px] truncate">{projectTitle}</span></div>)}
                   </div>
-                  
                   <div className="flex gap-2">
-                      {!isSplitMode && (
-                          <button 
-                            onClick={handleSplitText}
-                            disabled={text.length <= 1700}
-                            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${text.length > 1700 ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-slate-50 text-slate-300 cursor-not-allowed'}`}
-                            title={text.length > 1700 ? "文本超过1700字时建议使用" : "文本未超过1700字，无需拆分"}
-                          >
-                              <Split className="w-3.5 h-3.5" /> 拆分文本
-                          </button>
-                      )}
-                      {isSplitMode && step === 2 && (
-                          <button 
-                            onClick={handleGenerateDual}
-                            disabled={loading}
-                            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-violet-500/20"
-                          >
-                              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 
-                              语音合成
-                          </button>
-                      )}
-                      {isSplitMode && step === 3 && (
-                          <button 
-                            onClick={handleMerge}
-                            disabled={loading}
-                            className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-fuchsia-500/20"
-                          >
-                              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />} 
-                              手动重试合并
-                          </button>
-                      )}
+                      {!isSplitMode && (<button onClick={handleSplitText} disabled={text.length <= 1700} className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all ${text.length > 1700 ? 'bg-slate-100 hover:bg-slate-200 text-slate-700' : 'bg-slate-50 text-slate-300 cursor-not-allowed'}`} title={text.length > 1700 ? "文本超过1700字时建议使用" : "文本未超过1700字，无需拆分"}><Split className="w-3.5 h-3.5" /> 拆分文本</button>)}
+                      {isSplitMode && step === 2 && (<button onClick={handleGenerateDual} disabled={loading} className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-violet-500/20">{loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />} 语音合成</button>)}
+                      {isSplitMode && step === 3 && (<button onClick={handleMerge} disabled={loading} className="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-fuchsia-500/20">{loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Merge className="w-3.5 h-3.5" />} 手动重试合并</button>)}
                   </div>
               </div>
 
-              {/* Text Input Area */}
+              {/* Text Input */}
               <div className="flex-1 flex flex-col min-h-[300px]">
                 {isSplitMode ? (
                     <div className="flex flex-col h-full gap-4">
-                        {/* Split Ratio Slider */}
-                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-4">
-                            <div className="flex items-center gap-2 text-xs font-bold text-slate-500 whitespace-nowrap">
-                                <Scaling className="w-4 h-4 text-violet-500" />
-                                拆分比例 <span className="bg-slate-100 px-1.5 py-0.5 rounded text-violet-600 font-mono">{splitRatio}%</span>
-                            </div>
-                            <input 
-                                type="range" 
-                                min="10" 
-                                max="90" 
-                                value={splitRatio} 
-                                onChange={handleRatioChange}
-                                className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-violet-600"
-                                title="拖动滑块调整第一部分内容的比例（智能识别句子边界）"
-                            />
-                            <span className="text-[10px] text-slate-400 font-medium">智能整句拆分</span>
-                        </div>
-
+                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex items-center gap-4"><div className="flex items-center gap-2 text-xs font-bold text-slate-500 whitespace-nowrap"><Scaling className="w-4 h-4 text-violet-500" /> 拆分比例 <span className="bg-slate-100 px-1.5 py-0.5 rounded text-violet-600 font-mono">{splitRatio}%</span></div><input type="range" min="10" max="90" value={splitRatio} onChange={handleRatioChange} className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-violet-600" title="拖动滑块调整第一部分内容的比例（智能识别句子边界）" /><span className="text-[10px] text-slate-400 font-medium">智能整句拆分</span></div>
                         <div className="flex gap-4 flex-1">
-                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
-                                <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
-                                    <span className="text-xs font-bold text-slate-500">第一部分</span>
-                                    <span className="text-xs font-mono text-slate-400">{textPart1.length} chars</span>
-                                </div>
-                                <textarea 
-                                    value={textPart1}
-                                    onChange={(e) => setTextPart1(e.target.value)}
-                                    className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
-                                />
-                                {audioUrl1 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl1} className="w-full h-8" /></div>}
-                            </div>
-                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm">
-                                <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between">
-                                    <span className="text-xs font-bold text-slate-500">第二部分</span>
-                                    <span className="text-xs font-mono text-slate-400">{textPart2.length} chars</span>
-                                </div>
-                                <textarea 
-                                    value={textPart2}
-                                    onChange={(e) => setTextPart2(e.target.value)}
-                                    className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" 
-                                />
-                                {audioUrl2 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl2} className="w-full h-8" /></div>}
-                            </div>
+                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm"><div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between"><span className="text-xs font-bold text-slate-500">第一部分</span><span className="text-xs font-mono text-slate-400">{textPart1.length} chars</span></div><textarea value={textPart1} onChange={(e) => setTextPart1(e.target.value)} className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" />{audioUrl1 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl1} className="w-full h-8" /></div>}</div>
+                            <div className="flex-1 bg-white rounded-2xl border border-slate-200 flex flex-col shadow-sm"><div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-2xl flex justify-between"><span className="text-xs font-bold text-slate-500">第二部分</span><span className="text-xs font-mono text-slate-400">{textPart2.length} chars</span></div><textarea value={textPart2} onChange={(e) => setTextPart2(e.target.value)} className="flex-1 p-4 text-slate-700 text-sm leading-relaxed resize-none outline-none" />{audioUrl2 && <div className="p-2 border-t bg-slate-50 rounded-b-2xl"><audio controls src={audioUrl2} className="w-full h-8" /></div>}</div>
                         </div>
                     </div>
                 ) : (
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col flex-1 h-full">
                         <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                            <div className="flex items-center gap-2">
-                                <Languages className="w-4 h-4 text-slate-400" />
-                                <span className="text-xs font-bold text-slate-600 uppercase">
-                                    {projectTitle ? `项目文案: ${projectTitle}` : '文本输入'}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className="text-xs font-mono text-slate-400">
-                                    {text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字
-                                </span>
-                                <button 
-                                    onClick={handleGenerateSingle}
-                                    disabled={loading || streaming || !text}
-                                    className="px-4 py-1.5 bg-slate-900 hover:bg-violet-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />}
-                                    语音合成
-                                </button>
-                            </div>
+                            <div className="flex items-center gap-2"><Languages className="w-4 h-4 text-slate-400" /><span className="text-xs font-bold text-slate-600 uppercase">{projectTitle ? `项目文案: ${projectTitle}` : '文本输入'}</span></div>
+                            <div className="flex items-center gap-4"><span className="text-xs font-mono text-slate-400">{text.length} chars / {(text.match(/[\u4e00-\u9fa5]/g) || []).length} 汉字</span><button onClick={handleGenerateSingle} disabled={loading || streaming || !text} className="px-4 py-1.5 bg-slate-900 hover:bg-violet-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">{loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Settings2 className="w-3.5 h-3.5" />} 语音合成</button></div>
                         </div>
-                        <textarea 
-                          value={text}
-                          onChange={(e) => setText(e.target.value)}
-                          className="flex-1 p-6 text-slate-700 text-base leading-relaxed resize-none outline-none font-medium"
-                          placeholder="在此输入或粘贴需要转换的文本..."
-                        />
+                        <textarea value={text} onChange={(e) => setText(e.target.value)} className="flex-1 p-6 text-slate-700 text-base leading-relaxed resize-none outline-none font-medium" placeholder="在此输入或粘贴需要转换的文本..." />
                     </div>
                 )}
               </div>
 
-              {/* Bottom Action Bar */}
+              {/* Bottom Bar */}
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4 sticky bottom-6">
                  {finalAudioUrl && (
                    <div className="flex items-center gap-4 flex-1 w-full md:w-auto bg-slate-50 p-2 rounded-xl border border-slate-100">
                       <audio ref={audioRef} controls className="w-full h-8 outline-none" src={finalAudioUrl} />
-                      <a href={finalAudioUrl} download={downloadFileName} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频">
-                        <Download className="w-4 h-4" />
-                      </a>
-                      
-                      {projectId && (
-                         <>
-                            <div className="w-px h-4 bg-slate-200 mx-2" />
-                            <button 
-                                onClick={() => !isSavedToProject && handleSaveToProject()}
-                                disabled={savingToProject || isSavedToProject}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
-                                    isSavedToProject 
-                                    ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-default' 
-                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100'
-                                }`}
-                            >
-                                {savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : (finalAudioUrl.startsWith('blob:') ? <CloudUpload className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />)}
-                                {isSavedToProject ? '已上传项目文件' : (finalAudioUrl.startsWith('blob:') ? '上传并保存' : '手动保存')}
-                            </button>
-                         </>
-                      )}
+                      <a href={finalAudioUrl} download={downloadFileName} className="p-2 text-slate-400 hover:text-violet-600 transition-colors" title="下载音频"><Download className="w-4 h-4" /></a>
+                      {projectId && (<><div className="w-px h-4 bg-slate-200 mx-2" /><button onClick={() => !isSavedToProject && handleSaveToProject()} disabled={savingToProject || isSavedToProject} className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${isSavedToProject ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-default' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100'}`}>{savingToProject ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isSavedToProject ? <CheckCircle2 className="w-3.5 h-3.5" /> : (finalAudioUrl.startsWith('blob:') ? <CloudUpload className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />)}{isSavedToProject ? '已上传项目文件' : (finalAudioUrl.startsWith('blob:') ? '上传并保存' : '手动保存')}</button></>)}
                    </div>
                  )}
-                 
                  <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-                    {!isSplitMode ? (
-                        <>
-                            <button 
-                              onClick={handlePreview}
-                              disabled={loading || streaming || !text}
-                              className="px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-white border border-slate-200 hover:border-violet-300 hover:text-violet-600 transition-all flex items-center gap-2 disabled:opacity-50"
-                            >
-                               {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                               试听片段
-                            </button>
-                        </>
-                    ) : (
-                        <div className="text-xs text-slate-400 font-bold italic">
-                            分步模式进行中...
-                        </div>
-                    )}
+                    {!isSplitMode ? (<><button onClick={handlePreview} disabled={loading || streaming || !text} className="px-5 py-2.5 rounded-xl font-bold text-sm text-slate-600 bg-white border border-slate-200 hover:border-violet-300 hover:text-violet-600 transition-all flex items-center gap-2 disabled:opacity-50">{streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} 试听片段</button></>) : (<div className="text-xs text-slate-400 font-bold italic">分步模式进行中...</div>)}
                  </div>
               </div>
-
            </div>
         </div>
+      </div>
+
+      {/* Right Sidebar (History) */}
+      <div className={`border-l border-slate-200 bg-white flex flex-col transition-all duration-300 z-10 shadow-sm ${showHistory ? 'w-80' : 'w-14'}`}>
+          <div className="flex items-center justify-between p-4 border-b border-slate-100 h-14 shrink-0">
+              {showHistory && <h3 className="font-bold text-sm text-slate-700 flex items-center gap-2"><History className="w-4 h-4" /> 历史记录 ({historyItems.length})</h3>}
+              <button onClick={() => setShowHistory(!showHistory)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg mx-auto md:mx-0">
+                  <History className="w-5 h-5" />
+              </button>
+          </div>
+          
+          {showHistory && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                  {historyItems.length === 0 ? (
+                      <div className="text-center py-10 text-slate-400 text-xs">
+                          <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                          暂无生成记录
+                      </div>
+                  ) : (
+                      historyItems.map((item) => (
+                          <div key={item.id} className="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-violet-200 rounded-xl p-3 transition-all shadow-sm hover:shadow">
+                              <div className="flex justify-between items-start mb-2">
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${item.provider === 'aura' ? 'bg-fuchsia-50 text-fuchsia-600 border border-fuchsia-100' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                                      {item.provider}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 font-mono">
+                                      {new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  </span>
+                              </div>
+                              <p className="text-xs text-slate-600 line-clamp-2 mb-3 leading-relaxed font-medium" title={item.text}>
+                                  {item.text}
+                              </p>
+                              <div className="flex items-center justify-between mt-auto">
+                                  <button 
+                                      onClick={() => playHistoryItem(item)}
+                                      className="flex items-center gap-1.5 text-[10px] font-bold text-slate-500 hover:text-violet-600 bg-white border border-slate-200 hover:border-violet-200 px-2 py-1 rounded-lg transition-all"
+                                  >
+                                      <PlayCircle className="w-3.5 h-3.5" /> 播放
+                                  </button>
+                                  <div className="flex items-center gap-1">
+                                      {item.isCloud && <CloudCheck className="w-3 h-3 text-emerald-400" title="已云端同步" />}
+                                      <button 
+                                          onClick={(e) => { e.stopPropagation(); deleteHistoryItem(item.id); }}
+                                          className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                                      >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                      ))
+                  )}
+              </div>
+          )}
       </div>
     </div>
   );

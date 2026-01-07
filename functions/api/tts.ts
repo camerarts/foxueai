@@ -132,6 +132,9 @@ export const onRequestPost = async (context: any) => {
         });
     }
 
+    // Critical: Check upstream response status before streaming
+    // If upstream failed (e.g. 400/500), it sends JSON, not audio. 
+    // We must intercept this to prevent the client from playing "error json bytes" as silent audio.
     if (!response.ok) {
       const errText = await response.text();
       return Response.json({ error: `${provider} Error (${response.status}): ${errText.substring(0, 500)}` }, { status: response.status });
