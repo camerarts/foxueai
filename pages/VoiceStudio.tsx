@@ -6,7 +6,7 @@ import * as storage from '../services/storageService';
 
 // Default fallback voices
 const DEFAULT_ELEVEN_VOICE = '21m00Tcm4TlvDq8ikWAM'; // Rachel
-const DEFAULT_AURA_VOICE = 'aura-zeus-en'; // Placeholder default for Aura
+const DEFAULT_AURA_VOICE = 'English_expressive_narrator'; // Updated default from Aura docs
 
 type TtsProvider = 'elevenlabs' | 'aura';
 
@@ -17,8 +17,8 @@ const TTS_MODELS: Record<TtsProvider, { id: string; name: string }[]> = {
     { id: 'eleven_turbo_v2', name: 'Turbo v2 (Fast)' },
   ],
   aura: [
-    { id: 'aura-1', name: 'Aura 1 (Standard)' },
-    { id: 'aura-2', name: 'Aura 2 (Pro)' },
+    { id: 'speech-2.6-turb', name: 'Speech 2.6 Turbo (Recommended)' },
+    { id: 'speech-2.5', name: 'Speech 2.5 Standard' },
   ]
 };
 

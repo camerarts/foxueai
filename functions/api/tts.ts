@@ -41,22 +41,55 @@ export const onRequestPost = async (context: any) => {
             return Response.json({ error: "Server Configuration Error: Missing AURA_API_KEY" }, { status: 500 });
         }
 
-        // Assuming Aura uses OpenAI-compatible endpoint structure based on common standards for 'aurastd'
-        const auraUrl = `https://tts.aurastd.com/v1/audio/speech`;
+        // AuraSTD API Endpoint
+        const auraUrl = `https://tts.aurastd.com/api/v1/tts`;
         
-        response = await fetch(auraUrl, {
+        // AuraSTD Payload Structure
+        const payload = {
+            text: text,
+            model: model_id || "speech-2.6-turb", // Default to Turbo model
+            voice_setting: {
+                voice_id: voice_id,
+                speed: 1,
+                vol: 1,
+                pitch: 0
+            },
+            audio_setting: {
+                sample_rate: 32000,
+                bitrate: 128000,
+                format: "mp3",
+                channel: 1
+            },
+            // Use 'url' format to get a download link, which we then fetch/stream back
+            // This avoids dealing with their 'hex' stream format manually
+            output_format: "url", 
+            stream: false, // We force false here to get the URL, then we stream the result of that URL
+            language_boost: "auto"
+        };
+
+        const initRes = await fetch(auraUrl, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${env.AURA_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                model: model_id || "aura-1",
-                input: text,
-                voice: voice_id,
-                response_format: "mp3"
-            })
+            body: JSON.stringify(payload)
         });
+
+        if (!initRes.ok) {
+            const errText = await initRes.text();
+            return Response.json({ error: `Aura Error (${initRes.status}): ${errText}` }, { status: initRes.status });
+        }
+
+        const json: any = await initRes.json();
+        
+        if (!json.audio || !json.audio.startsWith('http')) {
+             console.error("Aura Response:", json);
+             return Response.json({ error: "Aura generation succeeded but returned invalid URL" }, { status: 500 });
+        }
+
+        // Fetch the actual audio stream from the returned URL
+        response = await fetch(json.audio);
 
     } else {
         // Default: ElevenLabs
@@ -86,7 +119,7 @@ export const onRequestPost = async (context: any) => {
 
     if (!response.ok) {
       const errText = await response.text();
-      return Response.json({ error: `${provider} Error (${response.status}): ${errText}` }, { status: response.status });
+      return Response.json({ error: `${provider} Error (${response.status}): ${errText.substring(0, 500)}` }, { status: response.status });
     }
 
     if (stream) {
