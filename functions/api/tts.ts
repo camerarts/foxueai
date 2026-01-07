@@ -23,8 +23,6 @@ export const onRequestPost = async (context: any) => {
     const filename = `tts/${provider}_${hashHex}.mp3`;
 
     // 2. Check Cache (Cost Optimization) - Only for non-streaming requests
-    // Streaming usually implies immediate playback need, but we could cache it too. 
-    // For simplicity, we skip cache check on stream=true to ensure low latency start.
     if (!stream && env.BUCKET) {
         const cachedObject = await env.BUCKET.get(filename);
         if (cachedObject) {
@@ -123,17 +121,16 @@ export const onRequestPost = async (context: any) => {
         });
     }
 
-    // CRITICAL FIX: Check response status before streaming.
-    // If upstream returns 400/500, it sends a JSON error body, NOT audio bytes.
-    // If we just stream it, the browser treats it as a corrupt audio file (silent failure).
-    if (!response.ok) {
+    // CRITICAL FIX: Check status AND Content-Type
+    const cType = response.headers.get('content-type') || '';
+    
+    if (!response.ok || cType.includes('application/json')) {
       const errText = await response.text();
-      // Try to parse JSON error if possible for cleaner message
       try {
           const errJson = JSON.parse(errText);
-          return Response.json({ error: `${provider} API Error: ${errJson.detail?.message || errJson.message || JSON.stringify(errJson)}` }, { status: response.status });
+          return Response.json({ error: `${provider} API Error: ${errJson.detail?.message || errJson.message || JSON.stringify(errJson)}` }, { status: response.ok ? 400 : response.status });
       } catch {
-          return Response.json({ error: `${provider} API Error (${response.status}): ${errText.substring(0, 200)}` }, { status: response.status });
+          return Response.json({ error: `${provider} API Error (${response.status}): ${errText.substring(0, 200)}` }, { status: response.ok ? 500 : response.status });
       }
     }
 

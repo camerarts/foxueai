@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio, History, Clock, PlayCircle, CloudCheck } from 'lucide-react';
@@ -380,7 +381,7 @@ const VoiceStudio: React.FC = () => {
       }
   };
 
-  // --- Single Generate (Stream + History + Client Upload) ---
+  // --- Single Generate (Stream + History) - NO AUTO UPLOAD ---
   const handleGenerateSingle = async () => {
       if (!text) {
           alert("请输入文本内容");
@@ -410,45 +411,12 @@ const VoiceStudio: React.FC = () => {
           }
 
           // 1. Add to History (Ephemeral Blob URL first)
-          const historyId = await addToHistory(blobUrl, text, false);
+          await addToHistory(blobUrl, text, false);
           
-          // Background Pipeline: Convert Blob -> Upload -> Save Project & History
-          (async () => {
-              try {
-                  await recordUsage(text.length);
-                  
-                  addLog("--> 🔄 正在后台上传至云端...");
-                  const blob = await fetch(blobUrl).then(r => r.blob());
-                  const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
-                  
-                  // Use a generic folder if no project ID
-                  const targetProjectId = projectId || 'temp_voice_history';
-                  const cloudUrl = await storage.uploadFile(file, targetProjectId);
-                  addLog(`--> ✅ 上传成功!`);
-                  
-                  // 2. Update History with Permanent URL
-                  await updateHistoryItemUrl(historyId, cloudUrl);
-
-                  if (projectId) {
-                      const project = await storage.getProject(projectId);
-                      if (project) {
-                          const updated = { 
-                              ...project, 
-                              audioFile: cloudUrl,
-                              moduleTimestamps: { ...(project.moduleTimestamps || {}), audio_file: Date.now() }
-                          };
-                          await storage.saveProject(updated);
-                          storage.uploadProjects().catch(console.error);
-                          setIsSavedToProject(true);
-                          addLog("--> 💾 项目已更新");
-                          setFinalAudioUrl(cloudUrl);
-                      }
-                  }
-              } catch (bgErr: any) {
-                  console.error("Background pipeline failed", bgErr);
-                  addLog(`⚠️ 后台上传失败: ${bgErr.message}`);
-              }
-          })();
+          // 2. Record usage stats
+          recordUsage(text.length).catch(console.error);
+          
+          addLog("ℹ️ 如需永久保存，请点击右下角“上传并保存”");
 
       } catch (e: any) {
           setLoading(false);
@@ -543,8 +511,18 @@ const VoiceStudio: React.FC = () => {
               addLog("🔄 检测到本地临时音频，正在上传...");
               const blob = await fetch(targetUrl).then(r => r.blob());
               const file = new File([blob], `tts_${Date.now()}.mp3`, { type: 'audio/mpeg' });
+              
               const cloudUrl = await storage.uploadFile(file, projectId);
               addLog("✅ 上传成功！");
+              
+              // Try to find the history item with the blob URL and update it to the cloud URL
+              // This persists the history item across page refreshes
+              const historyItemToUpdate = historyItems.find(i => i.audioUrl === targetUrl);
+              if (historyItemToUpdate) {
+                  await updateHistoryItemUrl(historyItemToUpdate.id, cloudUrl);
+                  addLog("✅ 历史记录已同步至云端");
+              }
+
               targetUrl = cloudUrl; 
               setFinalAudioUrl(cloudUrl); 
           }
