@@ -45,7 +45,7 @@ export const onRequestPost = async (context: any) => {
         const auraUrl = `https://tts.aurastd.com/api/v1/tts`;
         
         // AuraSTD Payload Structure
-        const payload = {
+        const payload: any = {
             text: text,
             model: model_id || "speech-2.6-turb", // Default to Turbo model
             voice_setting: {
@@ -60,36 +60,51 @@ export const onRequestPost = async (context: any) => {
                 format: "mp3",
                 channel: 1
             },
-            // Use 'url' format to get a download link, which we then fetch/stream back
-            // This avoids dealing with their 'hex' stream format manually
-            output_format: "url", 
-            stream: false, // We force false here to get the URL, then we stream the result of that URL
             language_boost: "auto"
         };
 
-        const initRes = await fetch(auraUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${env.AURA_API_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-        });
+        if (stream) {
+            // Streaming mode: Request direct audio bytes
+            payload.stream = true;
+            // payload.output_format = "mp3"; // Optional, depending on API defaults
+            
+            response = await fetch(auraUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${env.AURA_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+        } else {
+            // Legacy/Cache mode: Get URL first
+            payload.output_format = "url";
+            payload.stream = false;
 
-        if (!initRes.ok) {
-            const errText = await initRes.text();
-            return Response.json({ error: `Aura Error (${initRes.status}): ${errText}` }, { status: initRes.status });
+            const initRes = await fetch(auraUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${env.AURA_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!initRes.ok) {
+                const errText = await initRes.text();
+                return Response.json({ error: `Aura Error (${initRes.status}): ${errText}` }, { status: initRes.status });
+            }
+
+            const json: any = await initRes.json();
+            
+            if (!json.audio || !json.audio.startsWith('http')) {
+                 console.error("Aura Response:", json);
+                 return Response.json({ error: "Aura generation succeeded but returned invalid URL" }, { status: 500 });
+            }
+
+            // Fetch the actual audio stream from the returned URL
+            response = await fetch(json.audio);
         }
-
-        const json: any = await initRes.json();
-        
-        if (!json.audio || !json.audio.startsWith('http')) {
-             console.error("Aura Response:", json);
-             return Response.json({ error: "Aura generation succeeded but returned invalid URL" }, { status: 500 });
-        }
-
-        // Fetch the actual audio stream from the returned URL
-        response = await fetch(json.audio);
 
     } else {
         // Default: ElevenLabs

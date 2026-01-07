@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio } from 'lucide-react';
@@ -135,10 +136,11 @@ const VoiceStudio: React.FC = () => {
 
   // Check text length on change to suggest splitting
   useEffect(() => {
-      if (text.length > 1700 && !isSplitMode && step === 1) {
-          addLog(`检测到长文本 (${text.length} 字符)，建议使用拆分功能。`);
+      const limit = provider === 'aura' ? 1000 : 2500;
+      if (text.length > limit && !isSplitMode && step === 1) {
+          addLog(`检测到长文本 (${text.length} 字符)，Aura 建议超过 ${limit} 字时使用拆分功能。`);
       }
-  }, [text]);
+  }, [text, provider]);
 
   const loadData = async () => {
       try {
@@ -265,8 +267,9 @@ const VoiceStudio: React.FC = () => {
 
   const handleSplitText = () => {
       if (!text) return;
-      if (text.length <= 1700) {
-          alert("文本未超过 1700 字符，无需使用拆分功能，直接生成即可。");
+      const limit = provider === 'aura' ? 1000 : 2500;
+      if (text.length <= limit) {
+          alert(`当前渠道建议在文本超过 ${limit} 字符时使用拆分功能。您的文本较短，直接生成即可。`);
           return;
       }
       
