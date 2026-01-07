@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Mic, Play, Square, Download, Loader2, Save, Trash2, Volume2, Sparkles, Languages, Settings2, RefreshCw, Fingerprint, Star, Plus, CheckCircle2, FileAudio, Cpu, Pencil, Activity, Split, Merge, Scissors, ArrowRight, FolderOpen, BarChart3, Calendar, CloudUpload, Scaling, Radio } from 'lucide-react';
@@ -32,6 +31,7 @@ interface CustomVoice {
 interface UsageLog {
     timestamp: number;
     charCount: number;
+    provider?: TtsProvider; // Added provider field to logs
 }
 
 const STORAGE_KEY_VOICES = 'custom_voices';
@@ -172,7 +172,7 @@ const VoiceStudio: React.FC = () => {
   };
 
   const recordUsage = async (charCount: number) => {
-      const newLog: UsageLog = { timestamp: Date.now(), charCount };
+      const newLog: UsageLog = { timestamp: Date.now(), charCount, provider };
       const updatedLogs = [...usageLogs, newLog];
       setUsageLogs(updatedLogs);
       
@@ -213,7 +213,6 @@ const VoiceStudio: React.FC = () => {
 
   const handleSelectSavedVoice = (voice: CustomVoice) => {
       // If voice has a provider and it differs from current, switch provider
-      // Note: With the new filtering, this case is less likely unless invoked programmatically
       if (voice.provider && voice.provider !== provider) {
           setProvider(voice.provider);
       }
@@ -591,8 +590,23 @@ const VoiceStudio: React.FC = () => {
       ? `${projectTitle.replace(/[\\/:*?"<>|]/g, "_")}.mp3`
       : `tts_${Date.now()}.mp3`;
 
-  // --- Stats Calculation ---
-  const totalCharsUsed = useMemo(() => usageLogs.reduce((acc, log) => acc + log.charCount, 0), [usageLogs]);
+  // --- Filter Logic ---
+  const filteredUsageLogs = useMemo(() => {
+      return usageLogs.filter(log => {
+          const p = log.provider || 'elevenlabs'; // Default fallback
+          return p === provider;
+      });
+  }, [usageLogs, provider]);
+
+  const filteredSavedVoices = useMemo(() => {
+      return savedVoices.filter(voice => {
+          const p = voice.provider || 'elevenlabs'; // Default fallback
+          return p === provider;
+      });
+  }, [savedVoices, provider]);
+
+  // --- Stats Calculation (Filtered) ---
+  const totalCharsUsed = useMemo(() => filteredUsageLogs.reduce((acc, log) => acc + log.charCount, 0), [filteredUsageLogs]);
   
   const chartData = useMemo(() => {
       const now = new Date();
@@ -606,7 +620,7 @@ const VoiceStudio: React.FC = () => {
           dateMap.set(key, 0);
           labels.push(key);
       }
-      usageLogs.forEach(log => {
+      filteredUsageLogs.forEach(log => {
           const d = new Date(log.timestamp);
           const key = `${d.getMonth() + 1}/${d.getDate()}`;
           if (dateMap.has(key)) {
@@ -616,16 +630,7 @@ const VoiceStudio: React.FC = () => {
       labels.forEach(key => data.push(dateMap.get(key) || 0));
       const maxVal = Math.max(...data, 1);
       return { labels, data, maxVal };
-  }, [usageLogs, chartPeriod]);
-
-  // Filter saved voices based on current provider
-  const filteredSavedVoices = useMemo(() => {
-      return savedVoices.filter(voice => {
-          // Backward compatibility: undefined provider treated as 'elevenlabs'
-          const voiceProvider = voice.provider || 'elevenlabs'; 
-          return voiceProvider === provider;
-      });
-  }, [savedVoices, provider]);
+  }, [filteredUsageLogs, chartPeriod]);
 
   return (
     <div className="h-full flex flex-col md:flex-row bg-[#F8F9FC] overflow-hidden">
@@ -744,7 +749,7 @@ const VoiceStudio: React.FC = () => {
 
           {/* Stats Section */}
           <div className="shrink-0 space-y-4 pt-4 border-t border-slate-100">
-             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> 用量统计</label>
+             <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5" /> 用量统计 ({provider === 'elevenlabs' ? 'Eleven' : 'Aura'})</label>
              
              {/* Total Table */}
              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
